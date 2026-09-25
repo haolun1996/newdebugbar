@@ -62,7 +62,7 @@ it('injects assets into an html document that has no head', function () {
     $this->get('/html-without-head', ['Accept' => 'text/html'])
         ->assertOk()
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertSee('<html><head><style id="newdebugbar-critical-css"', false)
+        ->assertSeeInOrder(['<html><head>', '<style id="newdebugbar-critical-css"', '</head>'], false)
         ->assertSee('id="newdebugbar"', false);
 });
 

@@ -53,6 +53,7 @@ test('the real stdio server advertises complete profile access', function (strin
         $root,
         [
             'APP_ENV' => 'local',
+            'APP_DEBUG' => 'true',
             'APP_PACKAGES_CACHE' => $cacheEnvironmentPath.'/packages.php',
             'APP_SERVICES_CACHE' => $cacheEnvironmentPath.'/services.php',
         ],

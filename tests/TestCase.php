@@ -39,6 +39,7 @@ abstract class TestCase extends Orchestra
         }
 
         $app['config']->set('newdebugbar.environments', ['testing']);
+        $app['config']->set('app.debug', true);
         $app['config']->set('newdebugbar.storage.path', storage_path('framework/'.$profileDirectory));
         $app['config']->set('newdebugbar.collection.application_path', dirname(__DIR__));
         $app['config']->set('cache.default', 'array');
