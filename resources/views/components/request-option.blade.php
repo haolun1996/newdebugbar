@@ -1,4 +1,4 @@
-{{-- One fixed-column request option shared by the current and later request groups. --}}
+{{-- One fixed-column request option shared by the current, later, and other request groups. --}}
 <button
     type="button"
     role="option"

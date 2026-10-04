@@ -22,6 +22,8 @@ export function createRequests(context) {
     viewedProfileIds: PROFILE_PATTERN.test(summary.id ?? '') ? [summary.id] : [],
     profileLimit: requestLimit,
     pendingProfileIds: [],
+    storedProfiles: [],
+    storedProfilesPending: false,
     requestSelectionPending: null,
     relatedProfileSelection: null,
 
@@ -34,7 +36,11 @@ export function createRequests(context) {
     },
 
     requestIsUnread(profile) {
-      return profile.id !== this.currentRequestId && !this.viewedProfileIds.includes(profile.id);
+      return (
+        profile.id !== this.currentRequestId &&
+        !this.viewedProfileIds.includes(profile.id) &&
+        this.recentProfiles.some((recent) => recent.id === profile.id)
+      );
     },
 
     get currentRequestProfile() {
@@ -49,12 +55,21 @@ export function createRequests(context) {
       return this.laterRequestProfiles.length;
     },
 
+    get otherRequestProfiles() {
+      return this.storedProfiles.filter(
+        (profile) =>
+          profile.id !== this.currentRequestId &&
+          !this.pendingProfileIds.includes(profile.id) &&
+          !this.recentProfiles.some((recent) => recent.id === profile.id),
+      );
+    },
+
     get hasOtherRequests() {
-      return this.laterRequestCount > 0;
+      return this.laterRequestCount > 0 || this.otherRequestProfiles.length > 0;
     },
 
     get requestPickerButtonLabel() {
-      if (!this.hasOtherRequests) return 'No later requests yet';
+      if (!this.hasOtherRequests) return 'No other requests yet';
 
       if (this.unreadRequestCount === 0) return 'Choose request';
 
@@ -90,6 +105,26 @@ export function createRequests(context) {
 
       this.pendingProfileIds = this.pendingProfileIds.filter((id) => id !== summary.id);
       this.rememberProfile(summary);
+    },
+
+    loadRecentProfiles() {
+      const action = this.$wire?.loadRecentProfiles;
+      if (this.storedProfilesPending || typeof action !== 'function') return;
+
+      this.storedProfilesPending = true;
+      Promise.resolve(action.call(this.$wire))
+        .catch(() => {})
+        .finally(() => {
+          this.storedProfilesPending = false;
+        });
+    },
+
+    receiveRecentProfiles(profiles) {
+      if (!Array.isArray(profiles)) return;
+
+      this.storedProfiles = profiles
+        .filter((profile) => PROFILE_PATTERN.test(profile?.id ?? ''))
+        .slice(0, this.profileLimit);
     },
 
     openRelatedProfile(profileId, inspector = DEFAULT_INSPECTOR) {
@@ -157,7 +192,12 @@ export function createRequests(context) {
       this.requestSelectionPending = null;
       this.relatedProfileSelection = null;
       this.pendingProfileIds = this.pendingProfileIds.filter((id) => id !== summary.id);
-      if (selectedFromPicker || selectedFromRelation) {
+      if (selectedFromPicker && this.otherRequestProfiles.some((profile) => profile.id === summary.id)) {
+        this.storedProfiles = this.storedProfiles.map((profile) =>
+          profile.id === summary.id ? { ...profile, ...summary } : profile,
+        );
+        this.viewedProfileIds = [...new Set([...this.viewedProfileIds, summary.id])];
+      } else if (selectedFromPicker || selectedFromRelation) {
         this.rememberProfile(summary);
         this.viewedProfileIds = [...new Set([...this.viewedProfileIds, summary.id])];
       } else {
@@ -223,6 +263,7 @@ export function createRequests(context) {
       )
         return;
 
+      this.loadRecentProfiles();
       this.mobileToolbarMenu = null;
       this.mobileToolbarReturnFocus = null;
       this.closeThemeMenu(false);

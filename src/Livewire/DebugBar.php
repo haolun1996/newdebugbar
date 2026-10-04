@@ -37,7 +37,7 @@ final class DebugBar extends Component
         'queries' => 'Find repeated work, slow SQL, and the application code that triggered it.',
         'queue' => 'Review queued work, its connection and queue, and what happened during dispatch.',
         'redis' => 'Inspect direct Redis commands, their keys, connections, and timing.',
-        'request' => 'Inspect the selected request and switch between later requests captured on this page.',
+        'request' => 'Inspect the selected request and switch to later requests from this page or recent API requests from other clients.',
         'timeline' => 'Follow important work in the order it happened across the request.',
         'validation' => 'Review failed fields, messages, rules, and where validation came from.',
         'views' => 'See which Blade templates rendered and the data each received. Use this to spot missing variables, unexpected partials, and repeated renders.',
@@ -250,6 +250,27 @@ final class DebugBar extends Component
             'newdebugbar-profile-noticed',
             summary: $summaries->present($presenter->present($profile)),
         );
+    }
+
+    #[Renderless]
+    public function loadRecentProfiles(
+        ProfileStore $store,
+        ProfilePresenter $presenter,
+        ProfileSummaryPresenter $summaries,
+    ): void {
+        $profiles = [];
+
+        foreach ($store->recent($this->profileLimit) as $profile) {
+            $path = (string) ($profile['inspectors']['request']['payload']['path'] ?? '');
+
+            if (($profile['profile_type'] ?? 'http') !== 'http' || ($path !== '/api' && ! str_starts_with($path, '/api/'))) {
+                continue;
+            }
+
+            $profiles[] = $summaries->present($presenter->present($profile));
+        }
+
+        $this->dispatch('newdebugbar-recent-profiles-loaded', profiles: $profiles);
     }
 
     private function activateProfile(

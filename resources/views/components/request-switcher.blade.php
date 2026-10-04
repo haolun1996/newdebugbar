@@ -174,6 +174,7 @@
                 role="group"
                 aria-labelledby="newdebugbar-later-requests-{{ $scope }}"
                 data-ndb-request-group="later"
+                x-show="laterRequestCount > 0"
                 class="ndb:mt-1 ndb:pt-1"
             >
                 <p
@@ -183,6 +184,24 @@
                     Later requests
                 </p>
                 <template x-for="request in laterRequestProfiles" :key="@js($scope) + '-later-' + request.id">
+                    <x-newdebugbar::request-option />
+                </template>
+            </div>
+
+            <div
+                role="group"
+                aria-labelledby="newdebugbar-other-requests-{{ $scope }}"
+                data-ndb-request-group="other"
+                x-show="otherRequestProfiles.length > 0"
+                class="ndb:mt-1 ndb:pt-1"
+            >
+                <p
+                    id="newdebugbar-other-requests-{{ $scope }}"
+                    class="ndb:px-2.5 ndb:py-1 ndb:text-xs ndb:font-bold ndb:uppercase ndb:tracking-wider ndb:text-zinc-400"
+                >
+                    Recent API requests
+                </p>
+                <template x-for="request in otherRequestProfiles" :key="@js($scope) + '-other-' + request.id">
                     <x-newdebugbar::request-option />
                 </template>
             </div>

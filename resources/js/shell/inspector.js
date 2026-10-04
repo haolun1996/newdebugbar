@@ -87,6 +87,7 @@ export function createInspectorShell(context) {
         this.syncInspectorPanels();
         this.syncHostLock();
         this.syncToolbarPlacement();
+        this.loadRecentProfiles?.();
         this.stopToolbarPlacementWatch =
           browser.watchHostDialogs?.(this.$root, () => this.syncToolbarPlacement()) ?? null;
       });

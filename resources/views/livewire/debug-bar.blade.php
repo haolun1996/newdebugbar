@@ -16,6 +16,8 @@
     @newdebugbar-profile-switched.window="switchProfile($event.detail.summary)"
     @newdebugbar-profile-noticed.window="receiveProfile($event.detail.summary)"
     @newdebugbar-profile-refreshed.window="receiveActivityRefresh($event.detail.summary, $event.detail.relatedProfiles)"
+    @newdebugbar-recent-profiles-loaded.window="receiveRecentProfiles($event.detail.profiles)"
+    @focus.window="loadRecentProfiles()"
     @newdebugbar-inspector-loaded.window="receiveInspector($event.detail.inspector, $event.detail.profileId)"
     class="ndb:pointer-events-none ndb:fixed ndb:inset-0 ndb:z-[2147483000] ndb:text-zinc-900 ndb:dark:text-zinc-100"
 >

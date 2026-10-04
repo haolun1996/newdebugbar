@@ -58,11 +58,22 @@ final class ProfileFinalizer
             }
         }
 
+        // A long-lived application reruns earlier terminating callbacks, so finish each request once.
+        $finished = false;
+        $finish = function () use (&$finished): void {
+            if ($finished) {
+                return;
+            }
+
+            $finished = true;
+            $this->finishAfterResponse();
+        };
+
         try {
-            $this->app->terminating(fn () => $this->finishAfterResponse());
+            $this->app->terminating($finish);
             $this->manager->resumeAfterResponse();
         } catch (Throwable) {
-            $this->finishAfterResponse();
+            $finish();
         }
     }
 

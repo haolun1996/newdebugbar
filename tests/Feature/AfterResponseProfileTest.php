@@ -37,3 +37,17 @@ it('keeps the response profile open through terminate without inflating HTTP dur
         ->status->toBe('completed')
         ->lifecycle->toBe('after_response');
 });
+
+it('finishes each response profile once when later unprofiled requests terminate', function (): void {
+    $store = app(ProfileStore::class);
+    $profileId = (string) $this->get('/profiled', ['Accept' => 'text/html'])
+        ->assertOk()
+        ->headers->get('X-NewDebugBar-Profile');
+    $profile = $store->get($profileId);
+    $profile['inspectors']['request']['payload']['path'] = '/kept';
+    $store->put($profile);
+
+    $this->get('/__newdebugbar/assets/newdebugbar.css')->assertOk();
+
+    expect($store->get($profileId)['inspectors']['request']['payload']['path'])->toBe('/kept');
+});

@@ -792,6 +792,12 @@ trait DefinesTestApplication
 
         $router->match(['get', 'post', 'patch'], '/api/plain-json', fn () => response()->json(['source' => 'api']));
 
+        $router->get('/api/orders', function () {
+            DB::statement('create table if not exists ndb_api_orders (id integer primary key, total integer)');
+
+            return response()->json(DB::select('select * from ndb_api_orders where total > ?', [0]));
+        });
+
         $router->get('/ajax-fragment', fn () => response('<div data-fragment>Search result</div>', 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
         ]));

@@ -557,6 +557,36 @@ it('announces later requests without changing the selected profile', function ()
         });
 });
 
+it('loads recent API requests from other clients without pages or runtime profiles', function () {
+    $pageId = $this->get('/profiled', ['Accept' => 'text/html'])
+        ->assertOk()
+        ->headers->get('X-NewDebugBar-Profile');
+    $apiId = $this->postJson('/api/plain-json')
+        ->assertOk()
+        ->headers->get('X-NewDebugBar-Profile');
+    $store = app(ProfileStore::class);
+    $worker = $store->get($apiId);
+    $worker['id'] = (string) Str::uuid();
+    $worker['profile_type'] = 'queue';
+    $store->put($worker);
+
+    Livewire::test(DebugBar::class, ['profileId' => $pageId])
+        ->call('loadRecentProfiles')
+        ->assertSet('profileId', $pageId)
+        ->assertNotDispatched('newdebugbar-content-updated')
+        ->assertDispatched('newdebugbar-recent-profiles-loaded', function (string $name, array $params) use ($apiId): bool {
+            $profiles = collect($params['profiles']);
+            $api = $profiles->firstWhere('id', $apiId);
+
+            return $profiles->pluck('id')->all() === [$apiId]
+                && $api['method'] === 'POST'
+                && $api['path'] === '/api/plain-json'
+                && $api['request_type_label'] === 'JSON'
+                && is_numeric($api['duration_ms'])
+                && $api['query_count'] === 0;
+        });
+});
+
 it('refreshes bounded background activity and announces completed worker profiles', function () {
     $originId = $this->get('/profiled-queued-communications', ['Accept' => 'text/html'])
         ->assertOk()

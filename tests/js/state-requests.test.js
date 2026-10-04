@@ -96,7 +96,7 @@ test('background profiles are announced once and stay counted after the picker o
   state.$root = { querySelector: () => ({ querySelectorAll: () => [] }) };
 
   assert.equal(state.hasOtherRequests, false);
-  assert.equal(state.requestPickerButtonLabel, 'No later requests yet');
+  assert.equal(state.requestPickerButtonLabel, 'No other requests yet');
   state.openRequestPicker('toolbar');
   assert.equal(state.requestPickerScope, null);
 
@@ -128,6 +128,106 @@ test('background profiles are announced once and stay counted after the picker o
   assert.equal(state.requestBadgeCount, '1');
   assert.equal(state.requestPickerButtonLabel, 'Choose request, 1 unread request');
   assert.deepEqual(calls, [['notice', ajaxProfileId]]);
+});
+
+test('requests from other clients load into their own group and stay out of page requests', async () => {
+  const current = {
+    ...summary,
+    id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8',
+    path: '/admin/orders',
+  };
+  const ajax = {
+    ...summary,
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    path: '/admin/orders/5',
+  };
+  const api = {
+    ...summary,
+    id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    path: '/api/v1/orders',
+  };
+  const pending = {
+    ...summary,
+    id: '550e8400-e29b-41d4-a716-446655440001',
+    path: '/api/v1/pending',
+  };
+  let loads = 0;
+  let finishLoad = () => {};
+  const state = createNewDebugBar(current, runtime(), [], 4);
+  state.$wire = {
+    noticeProfile: async () => {},
+    loadRecentProfiles: () => {
+      loads++;
+
+      return new Promise((resolve) => {
+        finishLoad = resolve;
+      });
+    },
+    switchProfile: async () => {},
+  };
+  state.$nextTick = (callback) => callback();
+  state.$root = { querySelector: () => ({ querySelectorAll: () => [] }) };
+
+  state.loadRecentProfiles();
+  state.loadRecentProfiles();
+  assert.equal(loads, 1);
+  state.receiveRecentProfiles([api, current, ajax, pending, { id: 'not-a-profile' }]);
+  finishLoad();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.storedProfilesPending, false);
+
+  assert.equal(state.storedProfiles.length, 4);
+  assert.deepEqual(
+    state.otherRequestProfiles.map(({ id }) => id),
+    [api.id, ajax.id, pending.id],
+  );
+  assert.equal(state.hasOtherRequests, true);
+  assert.equal(state.laterRequestCount, 0);
+  assert.equal(state.unreadRequestCount, 0);
+  assert.equal(state.requestIsUnread(api), false);
+  assert.equal(state.requestPickerButtonLabel, 'Choose request');
+
+  state.noticeProfile(pending.id);
+  state.receiveProfile(ajax);
+  assert.deepEqual(
+    state.otherRequestProfiles.map(({ id }) => id),
+    [api.id],
+  );
+
+  state.openRequestPicker('toolbar');
+  assert.equal(state.requestPickerScope, 'toolbar');
+  assert.equal(loads, 2);
+
+  state.selectRequest(api.id);
+  state.switchProfile({ ...api, status: 201 });
+  assert.equal(state.summary.id, api.id);
+  assert.equal(state.currentRequestId, current.id);
+  assert.deepEqual(
+    state.laterRequestProfiles.map(({ id }) => id),
+    [ajax.id],
+  );
+  assert.equal(state.otherRequestProfiles[0].status, 201);
+
+  state.receiveRecentProfiles(null);
+  assert.equal(state.otherRequestProfiles.length, 1);
+});
+
+test('a failed recent-request load keeps the previous list', async () => {
+  const state = createNewDebugBar(summary, runtime());
+  state.loadRecentProfiles();
+  assert.equal(state.storedProfilesPending, false);
+
+  state.$wire = {
+    loadRecentProfiles: async () => {
+      throw new Error('Unavailable');
+    },
+  };
+  state.storedProfiles = [{ ...summary, id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479' }];
+  state.loadRecentProfiles();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(state.storedProfilesPending, false);
+  assert.equal(state.storedProfiles.length, 1);
 });
 
 test('recent requests stay deduplicated, bounded, and include the selected request', () => {

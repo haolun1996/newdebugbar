@@ -1,5 +1,7 @@
 <?php
 
+use NewDebugBar\Tests\Support\DebugBarBrowser;
+
 it('collects background requests in the split button without changing the host page', function () {
     $page = visit('/profiled')
         ->assertScript('document.querySelector(\'[data-ndb-request-picker-trigger="toolbar"]\').disabled === true')
@@ -162,7 +164,8 @@ it('collects background requests in the split button without changing the host p
                     && unread.every((dot) => dot.getBoundingClientRect().width === 6 && dot.getBoundingClientRect().height === 6)
                     && state.laterRequestCount === 3
                     && options.length >= 4
-                    && groups.map((group) => group.dataset.ndbRequestGroup).join(',') === 'current,later'
+                    && groups.filter((group) => getComputedStyle(group).display !== 'none')
+                        .map((group) => group.dataset.ndbRequestGroup).join(',') === 'current,later'
                     && groups[0].querySelector('[data-ndb-request-option]').dataset.ndbProfileId === window.__newDebugBarActiveProfile
                     && groups[1].querySelectorAll('[data-ndb-request-option]').length === 3
                     && Number.parseFloat(getComputedStyle(groups[1]).borderTopWidth) === 0
@@ -285,5 +288,56 @@ it('collects background requests in the split button without changing the host p
 
     $page
         ->assertScript('document.querySelector(\'[data-ndb-request-badge="header"]\').getClientRects().length === 0')
+        ->assertNoJavaScriptErrors();
+});
+
+it('lists API requests from other clients and opens their queries', function () {
+    $this->getJson('/profiled-queries-rich')->assertOk();
+    $apiId = $this->getJson('/api/orders')
+        ->assertOk()
+        ->headers->get('X-NewDebugBar-Profile');
+
+    $page = visit('/profiled')
+        ->assertScript('document.querySelector(\'[data-ndb-request-picker-trigger="toolbar"]\').disabled === false')
+        ->assertScript('document.querySelector(\'[data-ndb-request-badge="toolbar"]\').getClientRects().length === 0')
+        ->click('[data-ndb-request-picker-trigger="toolbar"]')
+        ->assertVisible('#newdebugbar-request-list-toolbar [data-ndb-request-group="other"]')
+        ->assertScript(<<<JS
+            (() => {
+                const list = document.getElementById('newdebugbar-request-list-toolbar');
+                const visible = (element) => getComputedStyle(element).display !== 'none';
+                const groups = [...list.querySelectorAll('[data-ndb-request-group]')].filter(visible);
+                const options = [...list.querySelectorAll('[data-ndb-request-group="other"] [data-ndb-request-option]')];
+                const option = options.find((candidate) => candidate.dataset.ndbProfileId === '{$apiId}');
+
+                return groups.map((group) => group.dataset.ndbRequestGroup).join(',') === 'current,other'
+                    && options.length === 1
+                    && option?.textContent.includes('/api/orders')
+                    && /\\d+ queries/.test(option.textContent)
+                    && getComputedStyle(option.querySelector('[data-ndb-request-unread]')).opacity === '0';
+            })()
+            JS)
+        ->click("#newdebugbar-request-list-toolbar [data-ndb-request-option][data-ndb-profile-id=\"{$apiId}\"]")
+        ->assertScript("Alpine.\$data(document.getElementById('newdebugbar')).summary.id", $apiId);
+
+    DebugBarBrowser::waitForDetails($page);
+
+    $page->click('[data-ndb-select-inspector="queries"]');
+
+    DebugBarBrowser::waitForDetails($page);
+
+    $page->assertSeeIn('[data-ndb-inspector-panel="queries"] [data-ndb-query-sql]', 'ndb_api_orders')
+        ->click('[data-ndb-request-picker-trigger="header"]')
+        ->assertScript(<<<JS
+            (() => {
+                const list = document.getElementById('newdebugbar-request-list-header');
+                const selected = list.querySelector('[data-ndb-request-option][aria-selected="true"]');
+                const later = list.querySelector('[data-ndb-request-group="later"]');
+
+                return selected?.dataset.ndbProfileId === '{$apiId}'
+                    && selected.closest('[data-ndb-request-group]').dataset.ndbRequestGroup === 'other'
+                    && getComputedStyle(later).display === 'none';
+            })()
+            JS)
         ->assertNoJavaScriptErrors();
 });
