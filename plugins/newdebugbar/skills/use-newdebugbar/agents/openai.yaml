@@ -1,4 +1,0 @@
-interface:
-  display_name: "New Debug Bar"
-  short_description: "Debug Laravel with exact request data"
-  default_prompt: "Use $use-newdebugbar to inspect the Laravel request I just made and explain what needs attention."

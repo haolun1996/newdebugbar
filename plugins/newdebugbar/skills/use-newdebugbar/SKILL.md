@@ -1,11 +1,11 @@
 ---
 name: use-newdebugbar
-description: Install, set up, and use New Debug Bar in a Laravel app. Use when Codex needs to add the package, connect its local MCP server, inspect a browser request or saved profile, compare request performance, investigate findings or queries, or explain what happened, what is wrong, why, where, and what to inspect next.
+description: Install, set up, and use New Debug Bar in a Laravel app. Use when you need to add the package, connect its local MCP server, inspect a browser request or saved profile, compare request performance, investigate findings or queries, or explain what happened, what is wrong, why, where, and what to inspect next.
 ---
 
 # Use New Debug Bar
 
-Use the package's local MCP tools directly to read exact, saved Laravel request data. Do not start another Codex process or agent just to call the MCP server. Keep tool responses small, keep the answer short, and lead with the useful result.
+Use the package's local MCP tools directly to read exact, saved Laravel request data. Do not start a subagent or another Claude Code process just to call the MCP server. Keep tool responses small, keep the answer short, and lead with the useful result.
 
 ## Set up the package
 
@@ -14,8 +14,8 @@ Use the package's local MCP tools directly to read exact, saved Laravel request 
 3. If the package is missing, explain that it is a development-only dependency and ask before running `composer require --dev newdebugbar/newdebugbar`.
 4. Do not publish the config file by default. The package works without it. Run `php artisan vendor:publish --tag=newdebugbar-config` only when the user asks to change a setting.
 5. Confirm the app uses the `local` environment and New Debug Bar is enabled.
-6. Start a fresh Codex task after installing the plugin, or when the MCP server tried to start before the package was installed. A task's tool list does not refresh after plugin installation.
-7. Retry the first MCP call once if it fails while the local server starts. If it fails again, confirm `artisan`, the package, the environment, and the enabled setting before restarting the task.
+6. Restart Claude Code after installing the plugin, or when the MCP server tried to start before the package was installed. Ask the user to run `/mcp` to check that the `newdebugbar` server is connected.
+7. Retry the first MCP call once if it fails while the local server starts. If it fails again, confirm `artisan`, the package, the environment, and the enabled setting before asking the user to restart Claude Code.
 8. When the user asks to avoid a local package, check `composer.json` and `composer.lock` for a `path` repository and confirm the package under `vendor` is not a symlink. A GitHub ZIP URL is normal for a package installed through Packagist.
 
 ## Inspect a request

@@ -68,12 +68,14 @@
     "archive": {
         "exclude": [
             "/.gitattributes",
-            "/.agents",
+            "/.claude",
+            "/.claude-plugin",
             "/.github",
             "/.gitignore",
             "/.phpunit.cache",
             "/.phpstan.cache",
             "/AGENTS.md",
+            "/CLAUDE.md",
             "/composer.lock",
             "/node_modules",
             "/package-lock.json",

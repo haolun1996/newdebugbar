@@ -2,7 +2,7 @@
 
 $pluginPath = fn (string $path): string => dirname(__DIR__, 2).'/plugins/newdebugbar/'.$path;
 
-test('the Codex plugin starts the MCP server from the open Laravel app', function () use ($pluginPath) {
+test('the Claude Code plugin starts the MCP server from the open Laravel project', function () use ($pluginPath) {
     $config = json_decode(
         file_get_contents($pluginPath('.mcp.json')),
         true,
@@ -13,27 +13,31 @@ test('the Codex plugin starts the MCP server from the open Laravel app', functio
     expect($server)
         ->toMatchArray([
             'command' => 'php',
-            'args' => ['artisan', 'mcp:start', 'newdebugbar'],
+            'args' => ['${CLAUDE_PROJECT_DIR}/artisan', 'mcp:start', 'newdebugbar'],
         ])
         ->not->toHaveKey('cwd');
 
-    $fixture = sys_get_temp_dir().'/newdebugbar-plugin-'.bin2hex(random_bytes(8));
-    mkdir($fixture);
+    $project = sys_get_temp_dir().'/newdebugbar-plugin-'.bin2hex(random_bytes(8));
+    mkdir($project);
     file_put_contents(
-        $fixture.'/artisan',
+        $project.'/artisan',
         '<?php echo json_encode(array_slice($argv, 1), JSON_THROW_ON_ERROR);',
+    );
+    $args = array_map(
+        fn (string $arg): string => str_replace('${CLAUDE_PROJECT_DIR}', $project, $arg),
+        $server['args'],
     );
 
     try {
         $process = proc_open(
-            [$server['command'], ...$server['args']],
+            [$server['command'], ...$args],
             [
                 0 => ['pipe', 'r'],
                 1 => ['pipe', 'w'],
                 2 => ['pipe', 'w'],
             ],
             $pipes,
-            $fixture,
+            sys_get_temp_dir(),
         );
 
         expect($process)->toBeResource();
@@ -49,19 +53,19 @@ test('the Codex plugin starts the MCP server from the open Laravel app', functio
             ->and(json_decode($output, true, flags: JSON_THROW_ON_ERROR))
             ->toBe(['mcp:start', 'newdebugbar']);
     } finally {
-        unlink($fixture.'/artisan');
-        rmdir($fixture);
+        unlink($project.'/artisan');
+        rmdir($project);
     }
 });
 
 test('the repository exposes the plugin without adding it to Composer archives', function () use ($pluginPath) {
     $manifest = json_decode(
-        file_get_contents($pluginPath('.codex-plugin/plugin.json')),
+        file_get_contents($pluginPath('.claude-plugin/plugin.json')),
         true,
         flags: JSON_THROW_ON_ERROR,
     );
     $marketplace = json_decode(
-        file_get_contents(dirname(__DIR__, 2).'/.agents/plugins/marketplace.json'),
+        file_get_contents(dirname(__DIR__, 2).'/.claude-plugin/marketplace.json'),
         true,
         flags: JSON_THROW_ON_ERROR,
     );
@@ -76,22 +80,15 @@ test('the repository exposes the plugin without adding it to Composer archives',
             'name' => 'newdebugbar',
             'version' => '1.0.2',
             'license' => 'Apache-2.0',
-            'skills' => './skills/',
-            'mcpServers' => './.mcp.json',
         ])
-        ->and($manifest['interface']['defaultPrompt'])->toBe([
-            'Inspect the Laravel request I just made and explain what needs attention.',
-        ])
+        ->and($marketplace)->toHaveKeys(['name', 'owner.name'])
         ->and($marketplace['plugins'][0])
         ->toMatchArray([
             'name' => 'newdebugbar',
-            'source' => [
-                'source' => 'local',
-                'path' => './plugins/newdebugbar',
-            ],
+            'source' => './plugins/newdebugbar',
         ])
         ->and($composer['archive']['exclude'])
-        ->toContain('/.agents', '/plugins');
+        ->toContain('/.claude', '/.claude-plugin', '/plugins');
 });
 
 test('the plugin teaches agents how to reach complete profile data', function () use ($pluginPath) {

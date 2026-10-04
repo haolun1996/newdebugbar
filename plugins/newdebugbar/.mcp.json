@@ -2,13 +2,7 @@
   "mcpServers": {
     "newdebugbar": {
       "command": "php",
-      "args": [
-        "artisan",
-        "mcp:start",
-        "newdebugbar"
-      ],
-      "startup_timeout_sec": 15,
-      "tool_timeout_sec": 30
+      "args": ["${CLAUDE_PROJECT_DIR}/artisan", "mcp:start", "newdebugbar"]
     }
   }
 }

@@ -1,5 +1,6 @@
 /.gitattributes export-ignore
 /AGENTS.md export-ignore
+/CLAUDE.md export-ignore
 /.github export-ignore
 /.gitignore export-ignore
 /composer.lock export-ignore

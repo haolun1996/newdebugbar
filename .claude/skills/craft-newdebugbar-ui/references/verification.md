@@ -2,7 +2,7 @@
 
 ## Start with the real product
 
-Use the built-in browser first. If it cannot reach or control the local app reliably, use Google Chrome through Computer Use. Do not use Safari. If neither browser is available, report rendered visual verification as blocked instead of treating source inspection as proof.
+Use Claude's built-in browser first when the session has it, then Claude in Chrome. If neither can reach or control the local app reliably, use Google Chrome through computer use. Do not use Safari. If neither browser is available, report rendered visual verification as blocked instead of treating source inspection as proof.
 
 For the benchmark, prove that Composer resolves this repository before treating the page as current package output. Use the populated Kyoto request when available:
 

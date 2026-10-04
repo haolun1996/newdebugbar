@@ -1,4 +1,0 @@
-interface:
-  display_name: "Craft New Debug Bar UI"
-  short_description: "Design consistent New Debug Bar interfaces"
-  default_prompt: "Use $craft-newdebugbar-ui to design or refine this New Debug Bar interface."

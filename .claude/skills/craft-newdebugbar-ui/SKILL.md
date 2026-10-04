@@ -9,7 +9,7 @@ Create calm, truthful Laravel debugging interfaces that help a developer underst
 
 ## Before changing the interface
 
-Read the repository `AGENTS.md`, then inspect the current populated inspector in the built-in browser. Use the benchmark route in [verification](references/verification.md) when available. Inspect the retained data and its presenter before deciding what the interface can claim. When the user refers to a prior decision, check the relevant task instead of reconstructing it.
+Read the repository `AGENTS.md`, then inspect the current populated inspector in a real browser, as described in [verification](references/verification.md). Use the benchmark route there when available. Inspect the retained data and its presenter before deciding what the interface can claim. When the user refers to a prior decision, check the relevant commit, pull request, or conversation instead of reconstructing it.
 
 Read the references that apply:
 

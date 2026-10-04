@@ -1,0 +1,14 @@
+{
+  "name": "newdebugbar",
+  "displayName": "New Debug Bar",
+  "version": "1.0.2",
+  "description": "Give Claude Code exact Laravel request data from New Debug Bar's local, read-only MCP server.",
+  "author": {
+    "name": "Benjamin Crozat",
+    "url": "https://github.com/newdebugbar"
+  },
+  "homepage": "https://github.com/newdebugbar/newdebugbar",
+  "repository": "https://github.com/newdebugbar/newdebugbar",
+  "license": "Apache-2.0",
+  "keywords": ["laravel", "debugging", "mcp", "claude-code"]
+}

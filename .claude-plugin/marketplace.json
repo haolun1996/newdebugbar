@@ -1,0 +1,16 @@
+{
+  "name": "newdebugbar",
+  "description": "New Debug Bar plugins for Claude Code.",
+  "owner": {
+    "name": "New Debug Bar",
+    "url": "https://github.com/newdebugbar"
+  },
+  "plugins": [
+    {
+      "name": "newdebugbar",
+      "source": "./plugins/newdebugbar",
+      "description": "Inspect Laravel requests with New Debug Bar's local MCP server.",
+      "category": "Developer Tools"
+    }
+  ]
+}
