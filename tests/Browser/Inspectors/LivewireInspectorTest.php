@@ -273,7 +273,7 @@ it('keeps the property editor usable in a narrow dark inspector', function () {
         ->click('[data-ndb-mobile-toolbar-action="inspector"]');
 
     $page->script(<<<'JS'
-        Alpine.$data(document.getElementById('newdebugbar')).setTheme('dark');
+        newDebugBarData(document.getElementById('newdebugbar')).setTheme('dark');
         JS);
 
     $page
@@ -313,7 +313,7 @@ it('keeps the property editor usable in a narrow dark inspector', function () {
 
     $page->script(<<<'JS'
         (() => {
-            const state = Alpine.$data(document.querySelector('[data-ndb-loaded-inspector="livewire"]'));
+            const state = newDebugBarData(document.querySelector('[data-ndb-livewire]'));
             state.livewireTrace = {
                 ...state.livewireTrace,
                 activity: state.livewireTrace.activity.map((item) => ({ ...item, status: 'failed' })),

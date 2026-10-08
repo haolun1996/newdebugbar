@@ -43,7 +43,7 @@ it('opens the inspector from the active toolbar anchor', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const fact = document.querySelector('[data-ndb-header-fact="duration"]');
-                const value = Array.from(fact.querySelectorAll('[x-text]')).at(-1)?.textContent.trim();
+                const value = fact.querySelector('[data-ndb-header-duration]')?.textContent.trim();
                 window.__ndbBottomDuration = value;
 
                 return /^(?:<1|\d+(?:\.\d+)?) (?:µs|ms|s)$/.test(value ?? '');
@@ -65,7 +65,7 @@ it('opens the inspector from the active toolbar anchor', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const toolbar = document.querySelector('[data-ndb-toolbar-shell]');
-                Alpine.$data(toolbar).pinToolbar('top');
+                newDebugBarData(toolbar).pinToolbar('top');
 
                 return true;
             })()
@@ -93,8 +93,7 @@ it('opens the inspector from the active toolbar anchor', function () {
                 }, { capture: true, once: true });
 
                 return panel.dataset.ndbPlacement === 'top'
-                    && panel.getAttribute('x-transition:enter-start') === 'ndb-inspector-offscreen'
-                    && panel.getAttribute('x-transition:leave-end') === 'ndb-inspector-offscreen';
+                    && panel.classList.contains('ndb-inspector-panel');
             })()
             JS)
         ->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
@@ -103,7 +102,7 @@ it('opens the inspector from the active toolbar anchor', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const fact = document.querySelector('[data-ndb-header-fact="duration"]');
-                const value = Array.from(fact.querySelectorAll('[x-text]')).at(-1)?.textContent.trim();
+                const value = fact.querySelector('[data-ndb-header-duration]')?.textContent.trim();
 
                 return value === window.__ndbBottomDuration
                     && /^(?:<1|\d+(?:\.\d+)?) (?:µs|ms|s)$/.test(value ?? '');
@@ -201,7 +200,7 @@ it('uses only the existing request split button at every corner', function () {
             ->assertScript(<<<JS
                 (() => {
                     const toolbar = document.querySelector('[data-ndb-toolbar-shell]');
-                    Alpine.\$data(toolbar).pinToolbar('{$placement}');
+                    newDebugBarData(toolbar).pinToolbar('{$placement}');
 
                     return true;
                 })()
@@ -267,7 +266,7 @@ it('uses only the existing request split button at every corner', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const toolbar = document.querySelector('[data-ndb-toolbar-shell]');
-                const state = Alpine.$data(toolbar);
+                const state = newDebugBarData(toolbar);
                 state.toolbarDragging = true;
                 state.toolbarDragTarget = 'bottom-right';
 
@@ -294,7 +293,7 @@ it('uses only the existing request split button at every corner', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const toolbar = document.querySelector('[data-ndb-toolbar-shell]');
-                const state = Alpine.$data(toolbar);
+                const state = newDebugBarData(toolbar);
                 state.toolbarDragging = false;
 
                 return true;

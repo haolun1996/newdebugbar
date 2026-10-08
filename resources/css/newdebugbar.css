@@ -14,8 +14,7 @@
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-@source "../views/**/*.blade.php";
-@source "../js/**/*.js";
+@source "../js/**/*.{js,jsx}";
 
 @theme {
   --container-8xl: 96rem;
@@ -116,13 +115,9 @@
   padding: 0;
 }
 
-#newdebugbar [x-cloak] {
-  display: none !important;
-}
-
-#newdebugbar [data-ndb-inspector-panel][hidden],
-#newdebugbar [data-ndb-timeline-item][hidden],
-#newdebugbar [data-ndb-log-entry][hidden] {
+/* React renders x-show style visibility as the hidden attribute; host styles must not reveal it. */
+#newdebugbar [hidden],
+#newdebugbar[hidden] {
   display: none !important;
 }
 

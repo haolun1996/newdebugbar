@@ -26,18 +26,12 @@ it('profiles application requests and excludes package owned traffic', function 
         ['components' => [$livewireEligibilityMessage('appointments')]],
         server: ['HTTP_X_LIVEWIRE' => 'true'],
     ), true],
-    'package toolbar update' => [fn () => Request::create(
-        '/livewire/update',
-        'POST',
-        ['components' => [$livewireEligibilityMessage('newdebugbar.toolbar')]],
-        server: ['HTTP_X_LIVEWIRE' => 'true'],
-    ), false],
-    'mixed host and toolbar update' => [fn () => Request::create(
+    'several host components in one update' => [fn () => Request::create(
         '/livewire/update',
         'POST',
         ['components' => [
             $livewireEligibilityMessage('appointments'),
-            $livewireEligibilityMessage('newdebugbar.toolbar'),
+            $livewireEligibilityMessage('calendar'),
         ]],
         server: ['HTTP_X_LIVEWIRE' => 'true'],
     ), true],
@@ -56,6 +50,8 @@ it('profiles application requests and excludes package owned traffic', function 
         ['components' => [['snapshot' => 'not-json']]],
         server: ['HTTP_X_LIVEWIRE' => 'true'],
     ), false],
+    'package API request' => [fn () => Request::create('/__newdebugbar/api/profiles/00000000-0000-4000-8000-000000000000/inspectors/queries', server: ['HTTP_ACCEPT' => 'application/json']), false],
+    'package query explain' => [fn () => Request::create('/__newdebugbar/api/profiles/00000000-0000-4000-8000-000000000000/queries/1/explain', 'POST', server: ['HTTP_X_NEWDEBUGBAR' => '1']), false],
     'package asset' => [fn () => Request::create('/__newdebugbar/assets/newdebugbar.js', server: ['HTTP_ACCEPT' => 'text/html']), false],
     'package Livewire runtime asset' => [fn () => Request::create('/livewire-95508dcc/livewire.js', server: ['HTTP_ACCEPT' => 'text/javascript']), false],
     'ordinary route named like Livewire' => [fn () => Request::create('/livewire/update', server: ['HTTP_ACCEPT' => 'text/html']), true],

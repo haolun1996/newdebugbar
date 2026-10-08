@@ -1,276 +1,179 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness } from './state-test-support.js';
+import {
+  EXPLAIN_FAILED,
+  cachedExplains,
+  compareQueries,
+  executionCount,
+  findingQuery,
+  formatQueryEvidence,
+  formatQueryType,
+  hasQuerySource,
+  matchesQuery,
+  needsExplain,
+  nextQuerySort,
+  queryFilters,
+  rememberExplain,
+  selectedExecution,
+  visibleQueries,
+  withExplains,
+} from '../../resources/js/ui/inspectors/queries/query-view.js';
 
-test('query workspace filters selects and keeps explain evidence scoped to the active execution', async () => {
-  const browser = runtime();
-  const { state, shell } = inspectorHarness('queries', { ...summary, query_count: 4 }, browser);
-  const appended = [];
-  const scrolls = [];
-  let detailFocused = 0;
-  let rowFocused = 0;
-  let highlighted = 0;
-  const style = () => ({ removeProperty() {}, setProperty() {} });
-  const item = (key, execution, duration, type, attention, slow, repeated, search, count = 1) => ({
-    dataset: {
-      ndbQueryKey: key,
-      ndbExecution: String(execution),
-      ndbDuration: String(duration),
-      ndbQueryType: type,
-      ndbAttention: String(attention),
-      ndbSlow: String(slow),
-      ndbRepeated: String(repeated),
-      ndbSearch: search,
-      ndbQueryExecutionCount: String(count),
-    },
-    hidden: false,
-    isConnected: true,
-    style: style(),
-    focus: () => rowFocused++,
-  });
-  const group = item('group-users', 1, 10, 'read', true, false, true, 'select users 1 2', 2);
-  const slowWrite = item('query-3', 3, 20, 'write', true, true, false, 'update clinics 42');
-  const normalRead = item('query-4', 4, 8, 'read', false, false, false, 'select clinics 42');
-  const rows = [group, slowWrite, normalRead];
-  const records = [
-    {
-      key: 'group-users',
-      executions: [
-        {
-          execution: 1,
-          explain_available: true,
-          explain: null,
-          explain_error: null,
-          source_available: true,
-          stack: [],
-        },
-        {
-          execution: 2,
-          explain_available: true,
-          explain: null,
-          explain_error: null,
-          source_available: false,
-          stack: [],
-        },
-      ],
-    },
-    {
-      key: 'query-3',
-      executions: [{ execution: 3, explain_available: false }],
-    },
-    { key: 'query-4', executions: [{ execution: 4, explain_available: true }] },
-  ];
-  const queryList = {
-    querySelectorAll: () => rows,
-    querySelector: (selector) => (selector.includes('ndb-repeated') ? group : slowWrite),
-    appendChild: (child) => appended.push(child),
-  };
-  const queryDetail = {
-    scrollTop: 42,
-    scrollTo: (options) => scrolls.push(options),
-    focus: () => detailFocused++,
-  };
-
-  browser.activeElement = () => group;
-  browser.highlight = () => highlighted++;
-  state.$refs = { queryList, queryDetail };
-  state.$nextTick = (callback) => callback();
-  state.initializeQueries(records);
-
-  assert.equal(state.querySelected, 'group-users');
-  assert.equal(state.querySelectedExecution, 1);
-  assert.equal(state.queryDetailOpen, false);
-  assert.equal(state.queryDetailTab, 'overview');
-  assert.equal(state.visibleQueryCount, 4);
-
-  state.setQueryFilter('write');
-  assert.equal(group.hidden, true);
-  assert.equal(slowWrite.hidden, false);
-  assert.equal(normalRead.hidden, true);
-  assert.equal(state.visibleQueryCount, 1);
-  assert.equal(state.querySelected, 'query-3');
-
-  state.querySearch = 'users';
-  state.setQueryFilter('read');
-  assert.equal(group.hidden, false);
-  assert.equal(normalRead.hidden, true);
-  assert.equal(state.visibleQueryCount, 2);
-  assert.equal(state.querySelected, 'group-users');
-
-  state.querySearch = '';
-  state.setQueryFilter('all');
-  appended.length = 0;
-  state.toggleQuerySort('duration');
-  assert.deepEqual(appended, [slowWrite, group, normalRead]);
-  assert.equal(state.querySort, 'duration');
-  assert.equal(state.querySortDirection, 'desc');
-  appended.length = 0;
-  state.toggleQuerySort('duration');
-  assert.deepEqual(appended, [normalRead, group, slowWrite]);
-  assert.equal(state.querySortDirection, 'asc');
-  appended.length = 0;
-  state.toggleQuerySort('duration');
-  assert.deepEqual(appended, [group, slowWrite, normalRead]);
-  assert.equal(state.querySort, 'execution');
-  assert.equal(state.querySortDirection, 'asc');
-
-  state.selectQueryRecord('group-users');
-  assert.equal(state.queryDetailOpen, true);
-  assert.equal(state.queryDetailTab, 'overview');
-  browser.viewportWidth = () => 390;
-  state.selectQueryRecord('group-users');
-  assert.equal(detailFocused, 1);
-  state.setQueryDetailTab('bindings');
-  assert.equal(state.queryDetailTab, 'overview');
-  state.selectQueryExecution(2);
-  assert.equal(state.querySelectedExecution, 2);
-  assert.equal(state.queryDetailTab, 'overview');
-  assert.equal(state.selectedQueryHasSource, false);
-  state.setQueryDetailTab('source');
-  assert.equal(state.queryDetailTab, 'overview');
-
-  const explained = [];
-  const wire = { explainQuery: async (execution) => explained.push(execution) };
-  await state.openQueryExplain(wire);
-  assert.equal(state.queryDetailTab, 'explain');
-  assert.deepEqual(explained, [2]);
-  assert.equal(state.queryExplainLoading, true);
-  assert.equal(records[0].executions[1].explain_loading, true);
-  assert.equal(state.queryExplainScrollTop, 42);
-  await state.openQueryExplain(wire);
-  assert.deepEqual(explained, [2]);
-  state.receiveQueryExplain({
-    profileId: shell.summary.id,
+const records = Object.freeze([
+  Object.freeze({
+    key: 'group-users',
     execution: 1,
-    error: 'Older execution failed.',
-  });
-  assert.equal(state.queryExplainLoading, true);
-  assert.equal(records[0].executions[0].explain_error, 'Older execution failed.');
-  state.receiveQueryExplain({
-    profileId: shell.summary.id,
-    execution: 'invalid',
-  });
-  state.receiveQueryExplain({
-    profileId: shell.summary.id,
-    execution: 2,
-    explain: {
-      mode: 'EXPLAIN QUERY PLAN',
-      driver: 'sqlite',
-      rows: [{ detail: 'SCAN users' }],
-    },
-    error: null,
-  });
-  assert.equal(state.queryExplain.mode, 'EXPLAIN QUERY PLAN');
-  assert.equal(records[0].executions[1].explain.driver, 'sqlite');
-  assert.equal(records[0].executions[1].explain_loading, false);
-  assert.deepEqual(scrolls.at(-1), { top: 42, behavior: 'instant' });
-  state.setQueryDetailTab('overview');
-  await state.openQueryExplain(wire);
-  assert.deepEqual(explained, [2]);
+    duration_ms: 10,
+    query_type: 'read',
+    attention: true,
+    slow: false,
+    repeated: true,
+    count: 2,
+    search: 'select users 1 2',
+    executions: Object.freeze([
+      Object.freeze({ execution: 1, explain_available: true, explain: null, explain_error: null }),
+      Object.freeze({ execution: 2, explain_available: true, explain: null, explain_error: null }),
+    ]),
+  }),
+  Object.freeze({
+    key: 'query-3',
+    execution: 3,
+    duration_ms: 20,
+    query_type: 'write',
+    attention: true,
+    slow: true,
+    repeated: false,
+    count: 1,
+    search: 'update clinics 42',
+    executions: Object.freeze([Object.freeze({ execution: 3, explain_available: false })]),
+  }),
+  Object.freeze({
+    key: 'query-4',
+    execution: 4,
+    duration_ms: 8,
+    query_type: 'read',
+    attention: false,
+    slow: false,
+    repeated: false,
+    count: 1,
+    search: 'select clinics 42',
+    executions: Object.freeze([Object.freeze({ execution: 4, explain_available: true })]),
+  }),
+]);
 
-  state.failQueryExplain();
-  assert.equal(state.queryExplainLoading, false);
-  assert.equal(state.queryExplainError, 'EXPLAIN could not be completed.');
-  assert.equal(state.formatQueryType('read'), 'Read');
-  assert.equal(state.formatQueryType(''), 'Query');
-  assert.equal(state.formatQueryEvidence(null), 'No evidence was captured.');
-  assert.equal(state.formatQueryEvidence('SCAN users'), 'SCAN users');
-  assert.equal(state.formatQueryEvidence({ ready: true }), '{\n  "ready": true\n}');
+const keys = (list) => list.map((record) => record.key);
 
-  const code = {
-    textContent: 'select * from users',
-    removeAttribute(attribute) {
-      this.removed = attribute;
-    },
-  };
-  state.highlightQueryCode(code);
-  assert.equal(code.removed, 'data-highlighted');
-  state.highlightQueryCode(null);
-
-  state.selectQueryRecord('query-3');
-  assert.equal(state.beginQueryExplain(), null);
-  await state.openQueryExplain(wire);
-  assert.deepEqual(explained, [2]);
-  state.selectQueryRecord('group-users');
-  state.selectQueryExecution(2);
-
-  state.closeQueryDetail();
-  assert.equal(state.queryDetailOpen, false);
-  assert.equal(detailFocused, 3);
-  assert.equal(rowFocused, 1);
-  assert.ok(highlighted > 0);
-
-  group.isConnected = false;
-  state.selectQueryRecord('group-users');
-  state.closeQueryDetail();
-  assert.equal(detailFocused, 4);
-  assert.equal(rowFocused, 2);
-  state.focusQueryFinding('invalid');
-  queryList.querySelector = () => null;
-  state.focusQueryFinding('slow');
-  assert.equal(state.queryFocusFilter, null);
-
-  assert.equal(
-    state.compareQueries(
-      { dataset: { ndbDuration: '10', ndbExecution: '1' } },
-      { dataset: { ndbDuration: '10', ndbExecution: '2' } },
-    ),
-    -1,
-  );
-
-  state.setQueryFilter('invalid');
-  state.toggleQuerySort('invalid');
-  state.selectQueryRecord('missing');
-  state.selectQueryExecution(999);
-  state.setQueryDetailTab('missing');
-  assert.equal(state.queryFilter, 'all');
-  assert.equal(state.querySort, 'execution');
-  assert.equal(state.querySelected, 'group-users');
-  assert.equal(state.querySelectedExecution, 1);
-  assert.equal(state.queryDetailTab, 'overview');
-
-  state.initializeQueries('invalid');
-  assert.deepEqual(state.queryRecords, []);
-  assert.equal(state.querySelected, null);
+test('filters and searches records by attention, type, and lowercase search text', () => {
+  assert.deepEqual(keys(visibleQueries(records)), ['group-users', 'query-3', 'query-4']);
+  assert.deepEqual(keys(visibleQueries(records, { filter: 'attention' })), ['group-users', 'query-3']);
+  assert.deepEqual(keys(visibleQueries(records, { filter: 'read' })), ['group-users', 'query-4']);
+  assert.deepEqual(keys(visibleQueries(records, { filter: 'write' })), ['query-3']);
+  assert.deepEqual(keys(visibleQueries(records, { search: '  CLINICS ' })), ['query-3', 'query-4']);
+  assert.deepEqual(keys(visibleQueries(records, { filter: 'read', search: 'clinics' })), ['query-4']);
+  assert.equal(matchesQuery(records[0], 'unknown', ''), false);
+  assert.equal(matchesQuery({ query_type: 'read' }, 'all', 'x'), false);
+  assert.equal(matchesQuery({ query_type: 'read' }, 'all', null), true);
 });
 
-test('EXPLAIN ignores success and failure from a replaced profile with the same execution', async () => {
-  const firstId = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
-  const secondId = '550e8400-e29b-41d4-a716-446655440000';
-  const { state, shell } = inspectorHarness('queries', { ...summary, id: firstId }, runtime());
-  const records = () => [{ key: 'query-1', executions: [{ execution: 1, explain_available: true }] }];
-  state.initializeQueries(records());
-  let rejectExplain;
-  const pending = state.runQueryExplain({
-    explainQuery: () =>
-      new Promise((resolve, reject) => {
-        rejectExplain = reject;
-      }),
+test('sorts by duration in both directions with execution order as the tie-breaker', () => {
+  assert.deepEqual(keys(visibleQueries(records, { sort: 'duration', direction: 'desc' })), [
+    'query-3',
+    'group-users',
+    'query-4',
+  ]);
+  assert.deepEqual(keys(visibleQueries(records, { sort: 'duration', direction: 'asc' })), [
+    'query-4',
+    'group-users',
+    'query-3',
+  ]);
+  assert.equal(
+    compareQueries({ execution: 2, duration_ms: 5 }, { execution: 1, duration_ms: 5 }, 'duration'),
+    1,
+  );
+  assert.equal(compareQueries({}, {}), 0);
+  assert.equal(compareQueries({}, {}, 'duration', 'desc'), 0);
+});
+
+test('duration sorting cycles from descending to ascending to execution order', () => {
+  assert.deepEqual(nextQuerySort('execution', 'asc'), { sort: 'duration', direction: 'desc' });
+  assert.deepEqual(nextQuerySort('duration', 'desc'), { sort: 'duration', direction: 'asc' });
+  assert.deepEqual(nextQuerySort('duration', 'asc'), { sort: 'execution', direction: 'asc' });
+});
+
+test('counts every run of a repeated pattern and mirrors the presenter filter options', () => {
+  assert.equal(executionCount(records), 4);
+  assert.equal(executionCount([{}]), 1);
+  assert.deepEqual(queryFilters(records), {
+    all: ['All', 4],
+    attention: ['Needs attention', 3],
+    read: ['Reads', 3],
+    write: ['Writes', 1],
+  });
+});
+
+test('finding intents choose the first visible repeated or slow record', () => {
+  assert.equal(findingQuery(records, 'repeated').key, 'group-users');
+  assert.equal(findingQuery(records, 'slow').key, 'query-3');
+  assert.equal(findingQuery(records.slice(2), 'slow'), null);
+  assert.equal(findingQuery(records, 'attention'), null);
+});
+
+test('selects a run of a record and falls back to its first run', () => {
+  assert.equal(selectedExecution(records[0], 2).execution, 2);
+  assert.equal(selectedExecution(records[0], 9).execution, 1);
+  assert.equal(selectedExecution(null, 1), null);
+  assert.equal(selectedExecution({ executions: [] }, 1), null);
+  assert.equal(hasQuerySource({ source_available: true }), true);
+  assert.equal(hasQuerySource({ source_available: false, stack: [{ file: 'a.php' }] }), true);
+  assert.equal(hasQuerySource({ source_available: false, stack: [] }), false);
+  assert.equal(hasQuerySource(null), false);
+});
+
+test('merges transient EXPLAIN state per run without mutating captured records', () => {
+  const merged = withExplains(records, {
+    1: { explain: { rows: [{ detail: 'SCAN users' }] }, error: null },
+    2: { loading: true },
+    4: { explain: null, error: 'The database connection is unavailable.' },
   });
 
-  shell.switchProfile({ ...summary, id: secondId });
-  state.destroy();
-  const next = shell.createInspector('queries');
-  next.initializeQueries(records());
-  next.beginQueryExplain();
-  next.receiveQueryExplain({
-    profileId: firstId,
-    execution: 1,
-    explain: { rows: ['old profile'] },
-  });
-  assert.equal(next.queryExplain, null);
-  assert.equal(next.queryExplainLoading, true);
-  rejectExplain(new Error('old request failed'));
-  await pending;
-  assert.equal(next.queryExplainError, null);
-  assert.equal(next.queryExplainLoading, true);
+  assert.deepEqual(merged[0].executions[0].explain, { rows: [{ detail: 'SCAN users' }] });
+  assert.equal(merged[0].executions[0].explain_loading, false);
+  assert.equal(merged[0].executions[1].explain_loading, true);
+  assert.equal(merged[0].executions[1].explain, null);
+  assert.equal(merged[1].executions[0].explain_error, null);
+  assert.equal(merged[2].executions[0].explain_error, 'The database connection is unavailable.');
+  assert.equal(records[0].executions[0].explain, null);
+  assert.deepEqual(withExplains([{ key: 'empty' }]), [{ key: 'empty', executions: [] }]);
 
-  next.receiveQueryExplain({
-    profileId: secondId,
-    execution: 1,
-    explain: { rows: ['selected profile'] },
-  });
-  assert.deepEqual(next.queryExplain.rows, ['selected profile']);
-  assert.equal(next.queryExplainLoading, false);
+  assert.equal(needsExplain(records[0].executions[0]), true);
+  assert.equal(needsExplain(records[1].executions[0]), false);
+  assert.equal(needsExplain(merged[0].executions[0]), false);
+  assert.equal(needsExplain(merged[0].executions[1]), false);
+  assert.equal(needsExplain(merged[2].executions[0]), false);
+  assert.equal(needsExplain(null), false);
+});
+
+test('remembers EXPLAIN results per profile within a bounded cache', () => {
+  assert.deepEqual(cachedExplains('missing'), {});
+  rememberExplain('kyoto', 2, { loading: true });
+  const explains = rememberExplain('kyoto', 2, { explain: null, error: EXPLAIN_FAILED });
+  assert.deepEqual(explains, { 2: { explain: null, error: EXPLAIN_FAILED } });
+  assert.deepEqual(cachedExplains('kyoto'), explains);
+
+  for (let index = 0; index < 25; index++) rememberExplain(`profile-${index}`, 1, { loading: true });
+
+  assert.deepEqual(cachedExplains('kyoto'), {});
+  assert.deepEqual(cachedExplains('profile-24'), { 1: { loading: true } });
+});
+
+test('formats evidence and query types for display', () => {
+  assert.equal(formatQueryEvidence(null), 'No evidence was captured.');
+  assert.equal(formatQueryEvidence(undefined), 'No evidence was captured.');
+  assert.equal(formatQueryEvidence(''), 'No evidence was captured.');
+  assert.equal(formatQueryEvidence('raw plan'), 'raw plan');
+  assert.equal(formatQueryEvidence([{ id: 1 }]), '[\n  {\n    "id": 1\n  }\n]');
+  assert.equal(formatQueryType('read'), 'Read');
+  assert.equal(formatQueryType(''), 'Query');
+  assert.equal(formatQueryType(null), 'Query');
 });

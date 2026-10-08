@@ -1,5 +1,6 @@
 <?php
 
+use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Tests\Support\DebugBarBrowser;
 
 it('shows Livewire validation messages rules and source on desktop and mobile', function () {
@@ -10,7 +11,7 @@ it('shows Livewire validation messages rules and source on desktop and mobile', 
         ->assertSee('The name field is required.')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 state.setTheme('light');
 
                 return state.laterRequestCount === 1
@@ -22,7 +23,7 @@ it('shows Livewire validation messages rules and source on desktop and mobile', 
         ->assertVisible('#newdebugbar-request-list-toolbar')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 const validation = state.recentProfiles.find((profile) => /^\/livewire-[0-9a-f]{8}\/update$/i.test(profile.path));
                 const option = document.querySelector(`[data-ndb-request-option][data-ndb-profile-id="${validation?.id}"]`);
 
@@ -33,7 +34,7 @@ it('shows Livewire validation messages rules and source on desktop and mobile', 
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
 
                 return state.summary.inspector_counts.validation === 1
                     && state.inspectorOpen === true;
@@ -93,7 +94,7 @@ it('shows Livewire validation messages rules and source on desktop and mobile', 
         ->assertNoJavaScriptErrors()
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 state.setTheme('dark');
 
                 return document.getElementById('newdebugbar').dataset.ndbTheme === 'dark';
@@ -128,5 +129,72 @@ it('shows Livewire validation messages rules and source on desktop and mobile', 
                     && labels.every((label) => getComputedStyle(label).display !== 'none');
             })()
             JS)
+        ->assertNoJavaScriptErrors();
+});
+
+it('explains redirected validation failures and messages carried from the previous request', function () {
+    $page = visit('/profiled-session-validation');
+    $page->script("localStorage.setItem('newdebugbar.preferences.v1', JSON.stringify({theme: 'light', favorites: ['validation']}))");
+    $page->refresh()->resize(1440, 900);
+    $id = $page->script("newDebugBarData(document.getElementById('newdebugbar')).summary.id");
+    $store = app(ProfileStore::class);
+    $profile = $store->get($id);
+    $profile['inspectors']['validation'] = [
+        'label' => 'Validation',
+        'summary' => ['count' => 2],
+        'payload' => ['items' => [
+            [
+                'source' => 'exception',
+                'fields' => ['email', 'name'],
+                'rules' => ['email' => ['Required', 'Email'], 'name' => ['Required']],
+                'messages' => [
+                    'email' => ['The email field must be a valid email address.'],
+                    'name' => ['The name field is required.'],
+                ],
+                'error_bag' => 'signup',
+                'exception_status' => 422,
+                'exception_message' => 'The email field must be a valid email address. (and 1 more error)',
+                'response_status' => 302,
+                'callsite' => ['file' => 'tests/Support/DefinesTestApplication.php', 'line' => 589],
+            ],
+            [
+                'source' => 'session',
+                'from_previous_request' => true,
+                'fields' => ['email', 'team'],
+                'rules' => ['email' => [], 'team' => []],
+                'messages' => [
+                    'email' => ['The email has already been taken.'],
+                    'team' => ['The selected team is invalid.'],
+                ],
+                'error_bag' => 'default',
+            ],
+        ]],
+    ];
+    $store->put($profile);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="validation"]');
+
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-validation-item="1"]');
+
+    $page->assertSeeIn('[data-ndb-validation-workspace]', '2 validation attempts')
+        ->assertSeeIn('[data-ndb-validation-item="0"]', '2 fields failed validation')
+        ->assertSeeIn('[data-ndb-validation-item="0"]', 'signup bag')
+        ->assertSeeIn('[data-ndb-validation-item="0"]', 'Validation 422')
+        ->assertSeeIn('[data-ndb-validation-item="0"]', 'Redirect 302')
+        ->assertSeeIn('[data-ndb-validation-message="name"]', 'The name field is required.')
+        ->assertSeeIn('[data-ndb-validation-callsite="0"]', 'tests/Support/DefinesTestApplication.php:589')
+        ->assertDontSee('Show validation messages')
+        ->assertSeeIn('[data-ndb-validation-item="1"]', 'Carried from the previous request.')
+        ->assertScript(<<<'JS'
+            [...document.querySelectorAll('[data-ndb-validation-item="1"] header span')]
+                .some((badge) => badge.textContent.trim() === 'Previous request')
+            JS)
+        ->assertSeeIn('[data-ndb-validation-item="1"]', 'default bag')
+        ->assertSeeIn('[data-ndb-validation-item="1"]', 'The email has already been taken.')
+        ->assertSeeIn('[data-ndb-validation-item="1"]', 'Why rules and source may be missing')
+        ->assertSeeIn('[data-ndb-validation-item="1"]', 'Failed rules and source code are not available on this request.')
+        ->assertSeeIn('[data-ndb-validation-rules="team"]', 'Not captured')
+        ->assertMissing('[data-ndb-validation-callsite="1"]')
         ->assertNoJavaScriptErrors();
 });

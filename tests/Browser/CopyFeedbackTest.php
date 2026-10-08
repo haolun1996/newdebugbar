@@ -2,7 +2,7 @@
 
 it('keeps labeled and source copy feedback stable across selections', function (int $width, int $height, string $theme) {
     $page = visit('/profiled')->resize($width, $height);
-    $page->script("Alpine.\$data(document.getElementById('newdebugbar')).setTheme('$theme')");
+    $page->script("newDebugBarData(document.getElementById('newdebugbar')).setTheme('$theme')");
     $page->click($width < 640
         ? '[data-ndb-mobile-toolbar-metric-scope="toolbar"][data-ndb-mobile-toolbar-metric="queries"]'
         : '[data-ndb-toolbar="queries"]')

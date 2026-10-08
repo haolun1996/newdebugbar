@@ -25,20 +25,28 @@ test('malformed startup inputs use safe request defaults', () => {
   assert.equal(state.requestPickerButtonLabel, 'Choose request, 10 unread requests');
 });
 
-test('a new application profile keeps a matching inspector and resets stale inspector state', async () => {
+test('a new application profile keeps a matching inspector and unmounts the stale inspector', async () => {
   const state = createNewDebugBar(summary, runtime());
   let inspectorsLoaded = 0;
+  const lifecycle = [];
   state.$wire = { loadInspector: async () => inspectorsLoaded++ };
   state.$nextTick = (callback) => callback();
   state.selected = 'logs';
   state.inspectorOpen = true;
   state.loadedInspector = 'logs';
-  const oldViews = state.createInspector('views');
-  oldViews.viewGroups = [{ id: 'view-1' }];
-  oldViews.viewFilter = 'framework';
-  oldViews.viewSearch = 'pagination';
-  oldViews.viewSelected = 'view-1';
-  oldViews.viewDetailOpen = true;
+  const instance = Symbol('logs');
+  state.mountInspector(
+    'logs',
+    state.summary.id,
+    {
+      initialized: true,
+      activate: () => lifecycle.push('activate'),
+      deactivate: () => lifecycle.push('deactivate'),
+      refresh: () => lifecycle.push('refresh'),
+    },
+    instance,
+  );
+  state.pendingInspectorIntent = { profileId: state.summary.id, inspector: 'logs', filter: 'error' };
 
   state.switchProfile({
     ...summary,
@@ -50,13 +58,11 @@ test('a new application profile keeps a matching inspector and resets stale insp
   assert.equal(state.summary.path, '/api/jobs');
   assert.equal(state.selected, 'logs');
   assert.equal(state.loadedInspector, 'logs');
-  const views = state.createInspector('views');
-  assert.notEqual(views, oldViews);
-  assert.deepEqual(views.viewGroups, []);
-  assert.equal(views.viewFilter, 'application');
-  assert.equal(views.viewSearch, '');
-  assert.equal(views.viewSelected, null);
-  assert.equal(views.viewDetailOpen, false);
+  assert.equal(state.pendingInspectorIntent, null);
+  assert.deepEqual(lifecycle, ['activate', 'refresh', 'deactivate']);
+  state.refreshInspector();
+  state.unmountInspector(instance);
+  assert.deepEqual(lifecycle, ['activate', 'refresh', 'deactivate']);
   assert.equal(inspectorsLoaded, 1);
 
   state.inspectorOpen = false;

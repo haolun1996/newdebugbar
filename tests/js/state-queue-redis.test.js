@@ -1,237 +1,166 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness, listRow } from './state-test-support.js';
+import {
+  QUEUE_STATUS_FALLBACK,
+  effectiveQueueFilter,
+  matchesQueueActivity,
+  queueAttemptLabel,
+  queueDetailStatusClass,
+  queueRetryText,
+  queueStatusClass,
+  queueSummary,
+  queueTargets,
+  queueView,
+} from '../../resources/js/inspectors/queue.js';
+import {
+  matchesRedisCommand,
+  redisAfterResponseText,
+  redisKeyEvidence,
+  redisSummary,
+  redisView,
+} from '../../resources/js/inspectors/redis.js';
+import { formatDuration } from '../../resources/js/duration.js';
 
-function row(dataset, focused) {
-  return { ...listRow(dataset), focus: (options) => focused.push([dataset, options]) };
-}
+const activities = [
+  { execution: 1, status_group: 'waiting', search: 'sendreceipt redis mail' },
+  { execution: 2, status_group: 'failed', search: 'syncinvoice runtimeexception' },
+  { execution: 3, status_group: 'completed', search: 'reindexsearch completed' },
+];
+const visible = (view) => view.rows.filter((row) => row.visible).map((row) => row.item.execution);
 
-test('Queue searches, filters, selects, and restores mobile list focus', () => {
-  const browser = runtime();
-  const { state, shell } = inspectorHarness('queue', summary, browser);
-  const focused = [];
-  const detailScrolls = [];
-  const contentScrolls = [];
-  const rows = [
-    row({ ndbQueueExecution: '1', ndbQueueGroup: 'waiting' }, focused),
-    row({ ndbQueueExecution: '2', ndbQueueGroup: 'failed' }, focused),
-    row({ ndbQueueExecution: '3', ndbQueueGroup: 'completed' }, focused),
-  ];
-  state.$refs = {
-    queueList: { children: rows },
-    queueDetail: {
-      scrollTo: (options) => detailScrolls.push(options),
-      focus: (options) => focused.push(['detail', options]),
-    },
-    content: { scrollTo: (options) => contentScrolls.push(options) },
-  };
-  state.$nextTick = (callback) => callback();
+test('Queue searches, filters, and keeps a visible job selected', () => {
+  let view = queueView(activities, { selected: 1 });
+  assert.deepEqual(visible(view), [1, 2, 3]);
+  assert.equal(view.selected, 1);
 
-  state.initializeQueue([
-    {
-      search: 'sendreceipt redis mail',
-      execution: 1,
-      status_group: 'waiting',
-      job: 'SendReceipt',
-      connection: 'redis',
-      queue: 'mail',
-    },
-    {
-      search: 'syncinvoice runtimeexception',
-      execution: 2,
-      status_group: 'failed',
-      job: 'SyncInvoice',
-      exception_class: 'RuntimeException',
-    },
-    {
-      search: 'reindexsearch completed',
-      execution: 3,
-      status_group: 'completed',
-      job: 'ReindexSearch',
-      status: 'completed',
-    },
-  ]);
+  view = queueView(activities, { filter: 'failed', selected: 1 });
+  assert.deepEqual(visible(view), [2]);
+  assert.equal(view.selected, 2);
+  assert.deepEqual(visible(queueView(activities, { search: ' REINDEX ' })), [3]);
 
-  assert.equal(state.queueFilter, 'all');
-  assert.equal(state.queueSelected, 1);
-  assert.equal(state.queueDetailOpen, false);
-  assert.equal(state.visibleQueueCount, 3);
-  assert.equal(state.selectedQueueActivity.execution, 1);
+  view = queueView(activities, { search: 'missing', selected: 2 });
+  assert.equal(view.visibleCount, 0);
+  assert.equal(view.selected, null);
+  assert.equal(matchesQueueActivity({ status_group: 'waiting' }, { search: 'x' }), false);
+  assert.equal(matchesQueueActivity({ status_group: 'waiting' }), true);
 
-  state.setQueueFilter('failed');
-  assert.equal(rows[0].hidden, true);
-  assert.equal(rows[1].hidden, false);
-  assert.equal(rows[2].hidden, true);
-  assert.equal(state.visibleQueueCount, 1);
-  assert.equal(state.queueSelected, 2);
-
-  state.setQueueFilter('all');
-  state.queueSearch = 'redis';
-  state.applyQueueView();
-  assert.equal(rows[0].hidden, false);
-  assert.equal(rows[1].hidden, true);
-  assert.equal(state.queueSelected, 1);
-
-  state.queueSearch = '';
-  state.applyQueueView();
-  state.selectQueueActivity(2);
-  assert.equal(state.queueSelected, 2);
-  assert.equal(state.queueDetailOpen, true);
-  assert.equal(detailScrolls.length, 1);
-  assert.equal(contentScrolls.length, 1);
-  assert.deepEqual(focused[0], ['detail', { preventScroll: true }]);
-
-  state.setQueueFilter('invalid');
-  state.selectQueueActivity(99);
-  assert.equal(state.queueFilter, 'all');
-  assert.equal(state.queueSelected, 2);
-
-  state.closeQueueDetail();
-  assert.equal(state.queueDetailOpen, false);
-  assert.deepEqual(focused.at(-1), [rows[1].dataset, { preventScroll: true }]);
-
-  state.queueSearch = 'missing';
-  state.applyQueueView();
-  assert.equal(state.visibleQueueCount, 0);
-  assert.equal(state.queueSelected, null);
-
-  state.initializeQueue('invalid');
-  assert.deepEqual(state.queueActivities, []);
-  assert.equal(state.queueSelected, null);
+  assert.equal(effectiveQueueFilter(activities, 'failed'), 'failed');
+  assert.equal(effectiveQueueFilter([activities[0]], 'failed'), 'all');
+  assert.equal(effectiveQueueFilter([], 'all'), 'all');
 });
 
-test('Queue preserves retained attempts while filtering and changing the selection', () => {
-  const { state, shell } = inspectorHarness('queue', summary, runtime());
-  const rows = [
-    row({ ndbQueueExecution: '1', ndbQueueGroup: 'completed' }, []),
-    row({ ndbQueueExecution: '2', ndbQueueGroup: 'failed' }, []),
-  ];
-  state.$refs = {
-    queueList: { children: rows },
-    queueDetail: { scrollTo() {}, focus() {} },
-    content: { scrollTo() {} },
-  };
-  state.$nextTick = (callback) => callback();
+test('Queue summarizes jobs, groups, and status presentation', () => {
+  const figures = queueSummary({ duration_ms: 4.25, failed_count: 1 }, activities, formatDuration);
 
-  const linked = {
-    search: 'sendreceipt',
-    execution: 1,
-    status_group: 'completed',
-    job: 'SendReceipt',
-    attempts: [{ sequence: 1, profile_id: 'linked-worker' }],
-  };
-  const unlinked = {
-    search: 'syncinvoice',
-    execution: 2,
-    status_group: 'failed',
-    job: 'SyncInvoice',
-    attempts: [],
-  };
-
-  state.initializeQueue([linked, unlinked]);
-  assert.equal(state.selectedQueueActivity.attempts.length, 1);
-
-  state.selectQueueActivity(2);
-  assert.deepEqual(state.selectedQueueActivity.attempts, []);
-
-  state.selectQueueActivity(1);
-  state.setQueueFilter('failed');
-  assert.equal(state.queueSelected, 2);
-
-  state.initializeQueue([{ ...linked, attempts: [] }]);
-  assert.deepEqual(state.selectedQueueActivity.attempts, []);
-});
-
-test('Redis builds bounded search state and keeps failed filtering truthful', () => {
-  const browser = runtime();
-  const { state, shell } = inspectorHarness('redis', summary, browser);
-  const focused = [];
-  const rows = [
-    row({ ndbRedisExecution: '1', ndbRedisFailed: 'false' }, focused),
-    row({ ndbRedisExecution: '2', ndbRedisFailed: 'true' }, focused),
-    row({ ndbRedisExecution: '3', ndbRedisFailed: 'false' }, focused),
-  ];
-  state.$refs = {
-    redisList: { children: rows },
-    redisDetail: {
-      scrollTo() {},
-      focus: (options) => focused.push(['detail', options]),
-    },
-    content: { scrollTo() {} },
-  };
-  state.$nextTick = (callback) => callback();
-
-  state.initializeRedis([
-    {
-      search: 'get default trip:kyoto',
-      execution: 1,
-      command: 'GET',
-      connection: 'default',
-      keys: ['trip:kyoto'],
-      key_hashes: [],
-    },
-    {
-      search: 'hget sessions 18b0b12c34d56e78 runtimeexception',
-      execution: 2,
-      command: 'HGET',
-      connection: 'sessions',
-      keys: [],
-      key_hashes: ['18b0b12c34d56e78'],
-      exception_class: 'RuntimeException',
-    },
-    {
-      search: 'flushdb maintenance',
-      execution: 3,
-      command: 'FLUSHDB',
-      connection: 'maintenance',
-      keys: [],
-      key_hashes: [],
-    },
+  assert.equal(figures.countLabel, '3 jobs');
+  assert.equal(figures.line, '4.25 ms total, 1 waiting, 1 failure');
+  assert.deepEqual(figures.filters, [
+    ['all', 'All', 3],
+    ['waiting', 'Waiting', 1],
+    ['failed', 'Failed', 1],
+    ['completed', 'Completed', 1],
   ]);
 
-  assert.equal(state.redisFilter, 'all');
-  assert.equal(state.redisSelected, 1);
-  assert.equal(state.redisDetailOpen, false);
-  assert.equal(state.visibleRedisCount, 3);
-  assert.equal(state.selectedRedisCommand.command, 'GET');
-  assert.match(state.redisCommands[0].search, /trip:kyoto/);
-  assert.match(state.redisCommands[1].search, /runtimeexception/);
+  const single = queueSummary({ failed_count: 2 }, [{ status_group: 'failed' }]);
+  assert.equal(single.countLabel, '1 job');
+  assert.equal(single.line, '0 total, 2 failures');
+  assert.deepEqual(single.filters, [
+    ['all', 'All', 1],
+    ['failed', 'Failed', 1],
+  ]);
+  assert.equal(queueSummary().line, '0 total');
 
-  state.setRedisFilter('failed');
-  assert.equal(rows[0].hidden, true);
-  assert.equal(rows[1].hidden, false);
-  assert.equal(rows[2].hidden, true);
-  assert.equal(state.redisSelected, 2);
-  assert.equal(state.visibleRedisCount, 1);
+  assert.match(queueStatusClass('failed'), /ndb:bg-red-100/);
+  assert.equal(queueStatusClass('unknown'), QUEUE_STATUS_FALLBACK);
+  assert.match(queueDetailStatusClass('failed'), /red/);
+  assert.match(queueDetailStatusClass('delayed'), /amber/);
+  assert.match(queueDetailStatusClass('waiting'), /amber/);
+  assert.match(queueDetailStatusClass('processing'), /indigo/);
+  assert.match(queueDetailStatusClass('queued'), /sky/);
+  assert.match(queueDetailStatusClass('sent'), /emerald/);
+  assert.match(queueDetailStatusClass('completed'), /emerald/);
+  assert.equal(queueDetailStatusClass('unknown'), '');
+});
 
-  state.setRedisFilter('all');
-  state.redisSearch = 'maintenance';
-  state.applyRedisView();
-  assert.equal(rows[2].hidden, false);
-  assert.equal(state.redisSelected, 3);
+test('Queue explains retries, attempts, and communication targets', () => {
+  assert.equal(
+    queueRetryText({ will_retry: true, attempts: [{}] }),
+    'Laravel can retry this job. Check the retained worker attempts below.',
+  );
+  assert.equal(
+    queueRetryText({ will_retry: true }),
+    'Laravel can retry this job. No worker attempt has been retained yet.',
+  );
+  assert.equal(
+    queueRetryText({ will_retry: false, attempts: [] }),
+    'Open the linked worker profile to inspect the failure in context.',
+  );
+  assert.equal(queueAttemptLabel({ attempt: null, sequence: 2 }), 'Attempt 2');
+  assert.equal(queueAttemptLabel({ sequence: 3 }), 'Attempt 3');
+  assert.equal(queueAttemptLabel({ attempt: 4, sequence: 1 }), 'Attempt 4');
+  assert.equal(queueTargets({ recipient_count: 2 }), 2);
+  assert.equal(queueTargets({ recipient_count: 0, notifiable_count: 3 }), 3);
+  assert.equal(queueTargets({}), '—');
+});
 
-  state.redisSearch = '18b0b12c';
-  state.applyRedisView();
-  assert.equal(rows[1].hidden, false);
-  assert.equal(state.redisSelected, 2);
+test('Redis filters failures, searches, and summarizes commands', () => {
+  const commands = [
+    { execution: 1, failed: false, search: 'get private-direct-key default' },
+    { execution: 2, failed: true, search: 'hget private-hash sessions' },
+  ];
 
-  state.redisSearch = '';
-  state.applyRedisView();
-  state.selectRedisCommand(1);
-  assert.equal(state.redisDetailOpen, true);
-  assert.deepEqual(focused.at(-1), ['detail', { preventScroll: true }]);
+  let view = redisView(commands, { selected: 1 });
+  assert.deepEqual(visible(view), [1, 2]);
+  assert.equal(view.selected, 1);
+  view = redisView(commands, { filter: 'failed', selected: 1 });
+  assert.deepEqual(visible(view), [2]);
+  assert.equal(view.selected, 2);
+  view = redisView(commands, { search: 'nothing', selected: 2 });
+  assert.equal(view.selected, null);
+  assert.equal(matchesRedisCommand({}, { search: 'x' }), false);
+  assert.equal(matchesRedisCommand({}), true);
 
-  state.setRedisFilter('succeeded');
-  state.selectRedisCommand(99);
-  assert.equal(state.redisFilter, 'all');
-  assert.equal(state.redisSelected, 1);
+  const figures = redisSummary({ duration_ms: 1.25 }, commands, formatDuration);
+  assert.equal(figures.countLabel, '2 commands');
+  assert.equal(figures.failures, 1);
+  assert.equal(figures.line, '1.25 ms total, 1 failure');
+  const many = redisSummary({ failed_count: 3 }, [{}]);
+  assert.equal(many.countLabel, '1 command');
+  assert.equal(many.line, '0 total, 3 failures');
+  assert.equal(redisSummary().line, '0 total');
+});
 
-  state.closeRedisDetail();
-  assert.equal(state.redisDetailOpen, false);
-  assert.deepEqual(focused.at(-1), [rows[0].dataset, { preventScroll: true }]);
+test('Redis presents retained keys, protected identifiers, and lifecycle notes', () => {
+  const keys = redisKeyEvidence({ keys: ['trip:kyoto', 'trip:nara'], key_hashes: ['abc'], key_dropped: 1 });
+  assert.equal(keys.copy, 'trip:kyoto\ntrip:nara');
+  assert.equal(keys.copyLabel, 'Copy keys');
+  assert.equal(keys.protectedOnly, false);
+  assert.equal(keys.none, false);
+  assert.equal(
+    keys.droppedLabel,
+    'more key was not retained because this command reached the capture limit.',
+  );
 
-  state.initializeRedis(null);
-  assert.deepEqual(state.redisCommands, []);
-  assert.equal(state.redisSelected, null);
+  const hashed = redisKeyEvidence({ keys: [], key_hashes: ['abc', 'def'], key_dropped: 2 });
+  assert.equal(hashed.copy, 'abc\ndef');
+  assert.equal(hashed.copyLabel, 'Copy identifiers');
+  assert.equal(hashed.protectedOnly, true);
+  assert.equal(
+    hashed.droppedLabel,
+    'more keys were not retained because this command reached the capture limit.',
+  );
+
+  const none = redisKeyEvidence({});
+  assert.equal(none.none, true);
+  assert.equal(none.dropped, 0);
+
+  assert.equal(
+    redisAfterResponseText({ after_response_label: '2 ms' }),
+    'This command ran 2 ms after the response was sent, so its time is not part of the response time.',
+  );
+  assert.equal(
+    redisAfterResponseText({}),
+    'This command ran after the response was sent, so its time is not part of the response time.',
+  );
 });

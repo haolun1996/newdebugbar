@@ -10,7 +10,6 @@ use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Reactive;
 use Livewire\Component;
-use NewDebugBar\Livewire\DebugBar;
 use NewDebugBar\ProfileManager;
 use ReflectionAttribute;
 use ReflectionClass;
@@ -453,9 +452,7 @@ final class LivewireRegistrar
 
     private function isHostComponent(?Component $component): bool
     {
-        return $component instanceof Component
-            && ! $component instanceof DebugBar
-            && $component->getName() !== 'newdebugbar.toolbar';
+        return $component instanceof Component;
     }
 
     private function componentTitle(Component $component): string

@@ -1,5 +1,6 @@
 <?php
 
+use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Tests\Support\DebugBarBrowser;
 
 it('shows one exception as focused full-width evidence', function () {
@@ -221,3 +222,57 @@ it('uses a list-detail workspace for multiple exceptions with mobile drill in', 
         ->assertAttribute('[data-ndb-exception-item="1"]', 'aria-pressed', 'true')
         ->assertNoJavaScriptErrors();
 });
+
+it('renders retained exception causes with a truthful current profile action', function (string $profileType, string $actionLabel) {
+    $page = visit('/profiled-reported-exception')->resize(1440, 900);
+    $id = $page->script("newDebugBarData(document.getElementById('newdebugbar')).summary.id");
+    $store = app(ProfileStore::class);
+    $profile = $store->get($id);
+    $profile['profile_type'] = $profileType;
+    $profile['inspectors']['exceptions'] = [
+        'label' => 'Exceptions',
+        'summary' => ['count' => 1],
+        'payload' => ['items' => [[
+            'class' => RuntimeException::class,
+            'message' => 'Top-level failure.',
+            'file' => 'app/Actions/Run.php',
+            'line' => 42,
+            'frames' => ['application' => [], 'vendor' => []],
+            'source' => null,
+            'causes' => [[
+                'class' => LogicException::class,
+                'message' => 'Underlying failure.',
+                'file' => 'app/Services/Dependency.php',
+                'line' => 17,
+                'frames' => ['application' => [], 'vendor' => []],
+                'source' => null,
+            ]],
+            'chain_truncated' => true,
+        ]]],
+    ];
+    $store->put($profile);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="exceptions"]');
+
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-exception-context-action]');
+
+    $page->assertSeeIn('[data-ndb-exception-context-action]', $actionLabel)
+        ->assertSee('Top-level failure.')
+        ->assertSee('No source context was captured for this exception.')
+        ->click('[data-ndb-exception-detail-tab="causes"]')
+        ->assertVisible('[data-ndb-exception-cause="0"]')
+        ->assertSeeIn('[data-ndb-exception-cause="0"]', 'Underlying failure.')
+        ->assertSeeIn('[data-ndb-exception-cause="0"]', 'app/Services/Dependency.php:17')
+        ->assertSee('More causes exist, but only the first five were retained.')
+        ->click('[data-ndb-exception-detail-tab="stack"]')
+        ->assertSee('No application frames were captured.')
+        ->assertSee('0 frames')
+        ->assertNoJavaScriptErrors();
+})->with([
+    'HTTP request' => ['http', 'Open request'],
+    'queue worker' => ['queue', 'Open worker'],
+    'Artisan command' => ['artisan', 'Open command'],
+    'test run' => ['test', 'Open test run'],
+    'other runtime' => ['runtime', 'Open runtime'],
+]);

@@ -1,6 +1,146 @@
 <?php
 
+use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Tests\Support\DebugBarBrowser;
+
+/** Opens the authorization inspector after replacing the captured decisions of a profiled page. */
+function visitAuthorizationDecisions(array $items): mixed
+{
+    $page = visit('/profiled-context')->resize(1440, 1000);
+    $store = app(ProfileStore::class);
+    $profile = $store->get($page->script('newDebugBarData().summary.id'));
+    $profile['inspectors']['authorization']['summary']['count'] = count($items);
+    $profile['inspectors']['authorization']['payload']['items'] = $items;
+    $store->put($profile);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="authorization"]');
+    DebugBarBrowser::waitForDetails($page);
+
+    return $page;
+}
+
+it('renders decisions for scanning and keeps structured evidence in the inspector', function () {
+    $page = visitAuthorizationDecisions([
+        [
+            'execution' => 7,
+            'result' => 'allowed',
+            'ability' => 'revise-itinerary',
+            'result_message' => 'The planner owns this trip.',
+            'result_code' => 'trip_owner',
+            'handler' => 'App\\Policies\\TripPolicy@reviseItinerary',
+            'handler_kind' => 'policy',
+            'handler_name' => 'App\\Policies\\TripPolicy@reviseItinerary',
+            'handler_source' => ['file' => 'app/Policies/TripPolicy.php', 'line' => 27],
+            'user' => [
+                'type' => 'App\\Models\\User',
+                'identifier_name' => 'id',
+                'identifier' => 42,
+                'name' => 'Mara Voss',
+            ],
+            'arguments' => [
+                [
+                    'position' => 1,
+                    'kind' => 'model',
+                    'type' => 'App\\Models\\Trip',
+                    'identifier' => 9,
+                    'route_key_name' => 'slug',
+                    'route_key' => 'kyoto-autumn',
+                    'name' => 'Kyoto in autumn',
+                ],
+                ['position' => 2, 'kind' => 'value', 'type' => 'string', 'value' => 'lodging'],
+                ['position' => 3, 'kind' => 'value', 'type' => 'int', 'value' => 3],
+            ],
+            'callsite' => ['file' => 'app/Actions/Trips/RefreshTripWorkspace.php', 'line' => 41],
+            'stack' => [[
+                'file' => 'app/Actions/Trips/RefreshTripWorkspace.php',
+                'line' => 41,
+                'function' => 'Gate::allows',
+            ]],
+        ],
+        [
+            'execution' => 8,
+            'result' => 'denied',
+            'ability' => 'access-private-planning-notes',
+            'result_message' => 'Guests cannot open private notes.',
+            'handler' => 'callback',
+            'handler_kind' => 'callback',
+            'handler_name' => 'Gate callback',
+            'user' => null,
+            'arguments' => [],
+            'callsite' => ['file' => 'app/Providers/AuthServiceProvider.php', 'line' => 31],
+        ],
+    ]);
+
+    $page->waitForText('2 decisions')
+        ->assertScript(<<<'JS'
+            (() => {
+                const text = (context, selector) => context.querySelector(selector)?.textContent.trim();
+                const [first, second] = document.querySelectorAll('[data-ndb-authorization-item]');
+                const filters = [...document.querySelectorAll('[data-ndb-authorization-filter]')]
+                    .map((option) => option.dataset.ndbAuthorizationFilter);
+                const evidence = JSON.parse(
+                    newDebugBarData(document.querySelector('[data-ndb-authorization]')).selectedAuthorizationDecision.copy_evidence,
+                );
+                const checks = {
+                    items: document.querySelectorAll('[data-ndb-authorization-item]').length === 2,
+                    filters: filters.join(',') === 'all,denied,allowed',
+                    firstResult: first.dataset.ndbAuthorizationResult === 'allowed' && ! first.hasAttribute('data-result'),
+                    firstAbility: text(first, '[data-ndb-authorization-ability]') === 'revise-itinerary',
+                    firstLabel: text(first, '[data-ndb-authorization-result-label]') === 'Allowed',
+                    firstUser: text(first, '[data-ndb-authorization-user]').includes('Mara Voss'),
+                    firstArguments: text(first, '[data-ndb-authorization-arguments]').includes('Kyoto in autumn and 2 more'),
+                    secondResult: second.dataset.ndbAuthorizationResult === 'denied',
+                    secondUser: text(second, '[data-ndb-authorization-user]').includes('Guest'),
+                    secondArguments: text(second, '[data-ndb-authorization-arguments]') === '—',
+                    detail: document.querySelectorAll('[data-ndb-authorization-detail]').length === 1,
+                    tabs: document.querySelectorAll('[data-ndb-authorization-detail-tab]').length === 0,
+                    combined: document.querySelectorAll('[data-ndb-authorization-detail-panel="combined"]').length === 1,
+                    copyEvidence: document.querySelectorAll('[data-ndb-authorization-copy-evidence]').length === 1,
+                    copyHandler: document.querySelectorAll('[data-ndb-authorization-copy-handler]').length === 0,
+                    copyHandlerSource: document.querySelectorAll('[data-ndb-authorization-copy-handler-source]').length === 1,
+                    connector: document.querySelectorAll('[data-ndb-authorization-connector]').length === 0,
+                    roles: [...document.querySelectorAll('[data-ndb-authorization-arguments-detail] dt')]
+                        .map((term) => term.textContent.trim()).join(',') === 'Resource,Additional context 1,Additional context 2',
+                    handlerLabel: document.querySelector('[data-ndb-authorization-detail-panel="combined"]').textContent
+                        .includes('Matched policy method'),
+                    message: document.querySelector('[data-ndb-authorization-response]').textContent
+                        .includes('The planner owns this trip.'),
+                    evidence: Object.hasOwn(evidence, 'user') && ! Object.hasOwn(evidence, 'actor')
+                        && ! Object.hasOwn(evidence, 'checked_from'),
+                };
+                const failures = Object.entries(checks).filter(([, passed]) => ! passed).map(([name]) => name);
+
+                if (failures.length > 0) throw new Error('Authorization markup failed: ' + failures.join(', '));
+
+                return true;
+            })()
+            JS)
+        ->assertDontSee('What should I inspect if this result looks wrong?')
+        ->assertDontSee('Laravel allowed this ability')
+        ->assertDontSee('No target or additional arguments were supplied.')
+        ->assertScript(<<<'JS'
+            (() => {
+                const root = document.querySelector('[data-ndb-authorization]');
+
+                return ! root.textContent.includes('→')
+                    && ! [...root.querySelectorAll('dt')].some((term) => term.textContent.trim() === 'Actor');
+            })()
+            JS)
+        ->click('[data-ndb-authorization-item="8"]')
+        ->assertSeeIn('[data-ndb-authorization-detail-ability]', 'access-private-planning-notes')
+        ->assertCount('[data-ndb-authorization-copy-callsite]', 1)
+        ->assertSeeIn('[data-ndb-authorization-copy-callsite]', 'app/Providers/AuthServiceProvider.php:31')
+        ->assertNoJavaScriptErrors();
+});
+
+it('renders a clear empty authorization state', function () {
+    visitAuthorizationDecisions([])
+        ->assertSee('No authorization decisions were captured.')
+        ->assertMissing('[data-ndb-authorization-workspace]')
+        ->assertMissing('[data-ndb-authorization-item]')
+        ->assertNoJavaScriptErrors();
+});
 
 it('scans filters searches and inspects authorization evidence on desktop', function () {
     $page = visit('/profiled-authorization-rich')
@@ -148,7 +288,7 @@ it('scans filters searches and inspects authorization evidence on desktop', func
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.querySelector('[data-ndb-loaded-inspector="authorization"]'));
+                const state = newDebugBarData(document.querySelector('[data-ndb-authorization]'));
 
                 window.newdebugbarAuthorizationClipboard = [];
                 Object.defineProperty(window.navigator, 'clipboard', {

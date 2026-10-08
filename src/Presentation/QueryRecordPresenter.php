@@ -90,27 +90,6 @@ final class QueryRecordPresenter
         return $queryRecords;
     }
 
-    /**
-     * Adds transient EXPLAIN results without changing the captured records.
-     *
-     * @param  list<array<string, mixed>>  $records
-     * @param  array<int, array<string, mixed>>  $explains
-     * @param  array<int, string>  $errors
-     * @return list<array<string, mixed>>
-     */
-    public function withExplains(array $records, array $explains, array $errors): array
-    {
-        foreach ($records as $recordIndex => $record) {
-            foreach ($record['executions'] as $index => $execution) {
-                $number = $execution['execution'];
-                $records[$recordIndex]['executions'][$index]['explain'] = $explains[$number] ?? null;
-                $records[$recordIndex]['executions'][$index]['explain_error'] = $errors[$number] ?? null;
-            }
-        }
-
-        return $records;
-    }
-
     /** @param list<array<string, mixed>> $records @return array<string, array{string, int}> */
     public function filters(array $records): array
     {

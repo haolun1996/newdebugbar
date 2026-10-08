@@ -7,6 +7,32 @@ it('omits empty cache source details while retaining any captured stack', functi
     $page->script("localStorage.setItem('newdebugbar.preferences.v1', JSON.stringify({theme: '$theme'}))");
     $page->refresh();
 
+    // Serve operation 2 without any source evidence and operation 3 with only operation 1's stack.
+    $page->script(<<<'JS'
+        (() => {
+            const fetch = window.fetch.bind(window);
+
+            window.fetch = async (input, init) => {
+                const response = await fetch(input, init);
+
+                if (!String(input).includes('/inspectors/cache')) return response;
+
+                const data = await response.clone().json();
+                const payload = data.profile.inspectors.cache.payload;
+                const original = payload.items.find((item) => item.execution === 1);
+                window.newdebugbarCacheSourceEvidence = { callsite: original.callsite, stack: original.stack };
+                payload.items = payload.items.map((item) => {
+                    if (item.execution === 2) return { ...item, callsite: null, stack: [] };
+                    if (item.execution === 3) return { ...item, callsite: null, stack: original.stack };
+
+                    return item;
+                });
+
+                return new Response(JSON.stringify(data), { status: response.status, headers: response.headers });
+            };
+        })()
+        JS);
+
     if ($width < 640) {
         $page->click('[data-ndb-mobile-toolbar-trigger="actions"]')
             ->click('[data-ndb-mobile-toolbar-action="inspector"]')
@@ -20,29 +46,31 @@ it('omits empty cache source details while retaining any captured stack', functi
 
     DebugBarBrowser::waitForDetails($page);
 
+    $open = function (int $execution) use ($page, $width): void {
+        if ($width < 1024) {
+            $page->click('[data-ndb-cache-detail-back]');
+        }
+
+        $page->click("[data-ndb-cache-item=\"{$execution}\"]")
+            ->assertAttribute("[data-ndb-cache-item=\"{$execution}\"]", 'aria-pressed', 'true');
+    };
+
     if ($width < 1024) {
         $page->click('[data-ndb-cache-item][aria-pressed="true"]');
     }
 
-    $page->assertVisible('[data-ndb-cache-source]');
-    $page->script(<<<'JS'
-        (() => {
-            const state = Alpine.$data(document.querySelector('[data-ndb-loaded-inspector="cache"]'));
-            const operation = state.selectedCacheOperation;
-            window.newdebugbarCacheSourceEvidence = { callsite: operation.callsite, stack: operation.stack };
-            operation.callsite = null;
-            operation.stack = [];
-        })()
-        JS);
+    $page
+        ->assertVisible('[data-ndb-cache-source]')
+        ->assertVisible('[data-ndb-cache-source] [data-ndb-inspector-source-fact]')
+        ->assertScript('window.newdebugbarCacheSourceEvidence.stack.length > 0');
+
+    $open(2);
 
     $page
         ->assertMissing('[data-ndb-cache-source]')
         ->assertVisible('[data-ndb-cache-header]');
 
-    $page->script(<<<'JS'
-        Alpine.$data(document.querySelector('[data-ndb-loaded-inspector="cache"]')).selectedCacheOperation.stack
-            = window.newdebugbarCacheSourceEvidence.stack
-        JS);
+    $open(3);
 
     $page
         ->assertVisible('[data-ndb-cache-source]')
@@ -56,10 +84,7 @@ it('omits empty cache source details while retaining any captured stack', functi
                 === window.newdebugbarCacheSourceEvidence.stack.length
             JS);
 
-    $page->script(<<<'JS'
-        Alpine.$data(document.querySelector('[data-ndb-loaded-inspector="cache"]')).selectedCacheOperation.callsite
-            = window.newdebugbarCacheSourceEvidence.callsite
-        JS);
+    $open(1);
 
     $page
         ->assertVisible('[data-ndb-cache-source] [data-ndb-inspector-source-fact]')

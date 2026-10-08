@@ -136,7 +136,7 @@ function succeedMessage(run, effects = {}, snapshot = null) {
   return phases;
 }
 
-test('tracks multiple top-level and nested component instances while excluding the toolbar', () => {
+test('tracks multiple top-level and nested host component instances', () => {
   const first = component('root-1', 'benchmark.control-panel');
   Object.defineProperty(first, 'parent', {
     get: () => {
@@ -145,8 +145,7 @@ test('tracks multiple top-level and nested component instances while excluding t
   });
   const second = component('root-2', 'benchmark.event-console');
   const child = component('child-1', 'benchmark.metric-card', { label: 'Revenue' }, first);
-  const toolbar = component('toolbar-1', 'newdebugbar.toolbar');
-  const { trace } = harness([first, second, child, toolbar]);
+  const { trace } = harness([first, second, child]);
   const snapshot = trace.snapshot();
 
   assert.equal(snapshot.ready, true);

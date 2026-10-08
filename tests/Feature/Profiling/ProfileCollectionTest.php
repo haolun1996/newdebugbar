@@ -47,16 +47,20 @@ it('captures a local web request and its Laravel activity', function () {
         ->assertOk()
         ->assertHeader('X-NewDebugBar-Profile')
         ->assertSee('data-testid="host-page"', false)
-        ->assertSee('id="newdebugbar"', false)
+        ->assertSee('<div id="newdebugbar-mount"', false)
+        ->assertSee('<script type="application/json" id="newdebugbar-boot">', false)
         ->assertSee('/__newdebugbar/assets/newdebugbar.css', false)
         ->assertSee('/__newdebugbar/assets/newdebugbar.js', false)
-        ->assertSee('id="newdebugbar-critical-css"', false)
         ->assertDontSee('data-navigate-track', false)
-        ->assertSee('wire:key="newdebugbar-toolbar"', false)
-        ->assertSee('data-update-uri', false);
+        ->assertDontSee('<!-- Livewire Styles -->', false)
+        ->assertDontSee('data-update-uri', false);
 
-    expect(substr_count((string) $response->getContent(), '<!-- Livewire Styles -->'))->toBe(1)
-        ->and(substr_count((string) $response->getContent(), 'data-update-uri='))->toBe(1);
+    preg_match('#<script type="application/json" id="newdebugbar-boot">(.*?)</script>#s', (string) $response->getContent(), $boot);
+
+    expect(json_decode($boot[1], true, flags: JSON_THROW_ON_ERROR)['summary'])
+        ->id->toBe($response->headers->get('X-NewDebugBar-Profile'))
+        ->path->toBe('/profiled')
+        ->query_count->toBe(3);
 
     $files = File::files(config('newdebugbar.storage.path'));
 

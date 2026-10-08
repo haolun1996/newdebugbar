@@ -66,7 +66,7 @@ it('uses the live token and keeps answering its own Livewire calls', function ()
         ->assertScript('window.__newdebugbarCsrfRecoveryRequests', 0)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
 
                 return state.laterRequestCount === 1
                     && state.recentProfiles.some((profile) => /^\/livewire-[0-9a-f]{8}\/update$/i.test(profile.path));

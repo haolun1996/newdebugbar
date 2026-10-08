@@ -1,100 +1,96 @@
-import { filterList } from './list.js';
-import { readInspectorPayload } from '../runtime.js';
+/** Pure view logic for the cache inspector. */
 
-/** Owns cache inspector state and interactions. */
-export function createCache(context) {
-  const { browser, shell } = context;
-  const summary = shell.summary;
+export const CACHE_FILTERS = ['all', 'reads', 'writes', 'deletes', 'failed'];
+
+const CATEGORIES = { reads: 'read', writes: 'write', deletes: 'delete' };
+
+const integer = (value) => Math.trunc(Number(value ?? 0)) || 0;
+const plural = (count, singular, plural) => (count === 1 ? singular : plural);
+const number = (value) => Number(value).toLocaleString('en-US');
+
+export function matchesCacheOperation(operation, { filter = 'all', search = '' } = {}) {
+  const term = String(search).toLowerCase().trim();
+  const matchesFilter =
+    filter === 'all' ||
+    (filter === 'failed' && Boolean(operation.failed)) ||
+    (CATEGORIES[filter] !== undefined && operation.category === CATEGORIES[filter]);
+
+  return matchesFilter && (term === '' || String(operation.search ?? '').includes(term));
+}
+
+/** Every operation with its visibility, the visible count, and the selection kept or moved to the first visible. */
+export function cacheView(operations, { filter = 'all', search = '', selected = null } = {}) {
+  const rows = operations.map((item) => ({ item, visible: matchesCacheOperation(item, { filter, search }) }));
+  const visible = rows.filter((row) => row.visible).map((row) => row.item.execution);
+
   return {
-    refresh() {
-      const payload = readInspectorPayload(this.$root, '[data-ndb-cache-payload]');
-      if (payload !== null) this.initializeCache(payload);
-    },
+    rows,
+    visibleCount: visible.length,
+    selected: visible.includes(selected) ? selected : (visible[0] ?? null),
+  };
+}
 
-    cacheOperations: [],
-    cacheFilter: 'all',
-    cacheSearch: '',
-    cacheSelected: null,
-    cacheDetailOpen: false,
-    visibleCacheCount: summary.inspector_counts?.cache ?? 0,
+/** Summary figures, filter options, and the attention sentence (cache-controls.blade.php). */
+export function cacheSummary(summary = {}, itemCount = 0) {
+  const count = integer(summary.retained_count ?? itemCount);
+  const reads = integer(summary.reads);
+  const hits = integer(summary.hits);
+  const misses = integer(summary.misses);
+  const writes = integer(summary.writes);
+  const flushes = integer(summary.flushes);
+  const deletes = integer(summary.forgets) + flushes;
+  const failures = integer(summary.failures);
+  const repeatedMisses = integer(summary.repeated_miss_count);
+  const filterCounts = summary.filter_counts ?? {};
+  const filters = [
+    ['all', 'All', count],
+    ['reads', 'Reads', reads],
+    ['writes', 'Writes', integer(filterCounts.writes ?? writes)],
+    ['deletes', 'Deletes', integer(filterCounts.deletes ?? deletes)],
+    ['failed', 'Failed', integer(filterCounts.failed ?? failures)],
+  ].filter(([key, , total]) => key === 'all' || total > 0);
+  const attention = [];
 
-    get selectedCacheOperation() {
-      return this.cacheOperations.find((operation) => operation.execution === this.cacheSelected) ?? null;
-    },
+  if (failures > 0)
+    attention.push(`${number(failures)} failed ${plural(failures, 'operation', 'operations')}`);
+  if (repeatedMisses > 0)
+    attention.push(`${number(repeatedMisses)} repeatedly missed ${plural(repeatedMisses, 'key', 'keys')}`);
+  if (flushes > 0) attention.push(`${number(flushes)} store ${plural(flushes, 'flush', 'flushes')}`);
 
-    initializeCache(operations) {
-      this.cacheOperations = Array.isArray(operations) ? operations : [];
-      if (this.initialized) {
-        this.$nextTick?.(() => this.applyCacheView());
-        return;
-      }
-      this.initialized = true;
-      this.cacheFilter = 'all';
-      this.cacheSearch = '';
-      this.cacheDetailOpen = false;
-      this.cacheSelected = this.cacheOperations[0]?.execution ?? null;
+  const sentence = attention.join(', ');
 
-      if (this.cacheOperations.length === 0) {
-        this.visibleCacheCount = 0;
+  return {
+    count,
+    countLabel: `${number(count)} ${plural(count, 'operation', 'operations')}`,
+    reads,
+    hitRateLabel: `${Number(summary.hit_rate ?? 0).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% hit rate`,
+    hitsLabel: `${number(hits)} ${plural(hits, 'hit', 'hits')}, ${number(misses)} ${plural(misses, 'miss', 'misses')}`,
+    highMissRate: Boolean(summary.high_miss_rate),
+    durationMs: Number(summary.duration_ms ?? 0),
+    failures,
+    filters,
+    attention: sentence === '' ? null : `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`,
+  };
+}
 
-        return;
-      }
+/** Whether a cache result reads as a warning (a miss or a flush). */
+export function cacheResultWarns(operation) {
+  return !operation.failed && ['miss', 'flushed'].includes(operation.result);
+}
 
-      this.$nextTick?.(() => this.applyCacheView());
-    },
+/** Which supporting details the overview shows for an operation (cache-overview-panel.blade.php). */
+export function cacheOperationDetails(operation) {
+  const write = ['write', 'write_failed'].includes(operation.operation);
+  const batch = operation.duration_scope === 'batch';
+  const failure = Boolean(operation.failed && operation.exception_message);
+  const callsite = Boolean(operation.callsite?.file);
 
-    setCacheFilter(filter) {
-      if (!['all', 'reads', 'writes', 'deletes', 'failed'].includes(filter)) return;
-
-      this.cacheFilter = filter;
-      this.applyCacheView();
-    },
-
-    selectCacheOperation(execution) {
-      if (!this.cacheOperations.some((operation) => operation.execution === execution)) return;
-
-      this.cacheSelected = execution;
-      this.cacheDetailOpen = true;
-      this.resetCacheDetailScroll();
-    },
-
-    resetCacheDetailScroll() {
-      this.$nextTick?.(() => {
-        this.$refs?.content?.scrollTo?.({ top: 0, behavior: 'instant' });
-        this.$refs?.cacheDetail?.scrollTo?.({ top: 0, behavior: 'instant' });
-        browser.highlight?.();
-      });
-    },
-
-    applyCacheView() {
-      if (this.cacheOperations.length === 0) {
-        this.cacheSelected = null;
-        this.cacheDetailOpen = false;
-        this.visibleCacheCount = 0;
-        return;
-      }
-      const list = this.$refs?.cacheList;
-      const search = this.cacheSearch.toLowerCase().trim();
-
-      const { visible, firstVisible, selectedVisible } = filterList(list?.children ?? [], {
-        selected: this.cacheSelected,
-        key: (item) => Number(item.dataset.ndbCacheExecution),
-        matches: (item) => {
-          const matchesFilter =
-            this.cacheFilter === 'all' ||
-            (this.cacheFilter === 'reads' && item.dataset.ndbCacheCategory === 'read') ||
-            (this.cacheFilter === 'writes' && item.dataset.ndbCacheCategory === 'write') ||
-            (this.cacheFilter === 'deletes' && item.dataset.ndbCacheCategory === 'delete') ||
-            (this.cacheFilter === 'failed' && item.dataset.ndbCacheFailed === 'true');
-          return matchesFilter && (search === '' || item.dataset.ndbCacheSearchText?.includes(search));
-        },
-      });
-
-      this.visibleCacheCount = visible;
-
-      if (!selectedVisible) {
-        this.cacheSelected = firstVisible;
-      }
-    },
+  return {
+    write,
+    batch,
+    failure,
+    any: write || batch || failure,
+    callsite,
+    source: callsite || (operation.stack ?? []).length > 0,
   };
 }

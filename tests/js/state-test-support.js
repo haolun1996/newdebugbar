@@ -115,29 +115,3 @@ export function toolbarHarness(saved = null) {
 
   return { browser, capture, pointer, state, toolbar };
 }
-
-// Supplies the parent Livewire scope used by a mounted Alpine inspector.
-export function inspectorHarness(
-  inspector,
-  summary,
-  browser,
-  recentProfiles = [],
-  profileLimit = 20,
-  trace = null,
-) {
-  const shell = createNewDebugBar(summary, browser, recentProfiles, profileLimit, trace);
-  shell.selected = inspector;
-  shell.loadedInspector = inspector;
-  shell.inspectorOpen = true;
-  const state = shell.createInspector(inspector);
-  for (const magic of ['$wire', '$nextTick']) {
-    Object.defineProperty(state, magic, {
-      configurable: true,
-      get: () => shell[magic],
-      set: (value) => {
-        shell[magic] = value;
-      },
-    });
-  }
-  return { state, shell };
-}

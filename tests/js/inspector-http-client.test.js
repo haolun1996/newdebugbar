@@ -1,151 +1,134 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness, listRow } from './state-test-support.js';
+import {
+  compareHttpClientRequests,
+  formatHttpClientEvidence,
+  httpClientBodyTruncated,
+  httpClientContentTypes,
+  httpClientFilterOptions,
+  httpClientHeaderCount,
+  httpClientView,
+  matchesHttpClientRequest,
+  nextHttpClientSort,
+  normalizeHttpClientRequests,
+} from '../../resources/js/inspectors/http-client.js';
 
-test('HTTP client filters failures and slow requests while keeping one selected', () => {
-  const browser = runtime();
-  const { state, shell } = inspectorHarness('http_client', summary, browser);
-  let detailResets = 0;
-  const element = (execution, duration, failed, slow, search) =>
-    listRow({
-      ndbExecution: String(execution),
-      ndbDuration: String(duration),
-      ndbFailed: String(failed),
-      ndbSlow: String(slow),
-      ndbSearch: search,
-    });
-  const first = element(1, 12, false, false, 'get api.example.test 200');
-  const second = element(2, 319.53, false, true, 'get api.slow.test 200');
-  const third = element(3, 68.44, true, false, 'delete api.error.test 503');
-  const appended = [];
-  state.$refs = {
-    httpClientList: {
-      querySelectorAll: () => [first, second, third],
-      appendChild: (child) => appended.push(child),
+const requests = normalizeHttpClientRequests([
+  { execution: 1, duration_ms: 12, failed: false, slow: false, search: 'get api.example.test 200' },
+  { execution: 2, duration_ms: '319.53', failed: false, slow: true, search: 'get api.slow.test 200' },
+  { execution: 3, duration_ms: 68.44, failed: true, slow: false, search: 'delete api.error.test 503' },
+  { execution: 4, duration_ms: null, failed: true, slow: false, search: 'post api.missing.test failed' },
+]);
+const order = (view) => view.rows.map((row) => row.item.execution);
+const visible = (view) => view.rows.filter((row) => row.visible).map((row) => row.item.execution);
+
+test('HTTP client normalizes source and evidence flags', () => {
+  const [full, sparse, unnumbered, keyed] = normalizeHttpClientRequests([
+    {
+      execution: 1,
+      callsite: { file: ' app/Services/Trips.php ', line: '42' },
+      stack: { 0: { file: 'app/A.php', line: 3 } },
+      request: { headers: { accept: ['json'] }, body: 'raw' },
+      response: { headers: {}, body: { ok: true } },
     },
-    httpClientDetail: { scrollTo: () => detailResets++ },
-  };
-  state.$nextTick = (callback) => callback();
-
-  state.initializeHttpClient([
-    { execution: 1, failed: false, slow: false, host: 'api.example.test' },
-    { execution: 2, failed: false, slow: true, host: 'api.slow.test' },
-    { execution: 3, failed: true, slow: false, host: 'api.error.test' },
+    { execution: 2, callsite: 'invalid', stack: null, request: null, response: [] },
+    { execution: 3, callsite: { file: 'routes/web.php', line: '' }, request: { body: '' } },
+    { execution: 4, callsite: { file: 'routes/api.php', line: null }, stack: [] },
   ]);
-  assert.equal(state.httpClientFilter, 'all');
-  assert.equal(state.httpClientSort, 'execution');
-  assert.equal(state.httpClientSortDirection, 'asc');
-  assert.equal(state.httpClientSelected, 1);
-  assert.equal(state.httpClientDetailOpen, false);
-  assert.equal(state.httpClientDetailTab, 'response');
-  assert.equal(state.selectedHttpClientRequest.host, 'api.example.test');
-  assert.equal(first.hidden, false);
-  assert.equal(first.style.display, '');
-  assert.equal(second.hidden, false);
-  assert.equal(second.style.display, '');
-  assert.equal(third.hidden, false);
-  assert.equal(state.visibleHttpClientCount, 3);
 
-  appended.length = 0;
-  state.toggleHttpClientSort('duration');
-  assert.deepEqual(appended, [second, third, first]);
-  assert.equal(state.httpClientSort, 'duration');
-  assert.equal(state.httpClientSortDirection, 'desc');
-  assert.equal(state.httpClientSelected, 1);
-  appended.length = 0;
-  state.toggleHttpClientSort('duration');
-  assert.deepEqual(appended, [first, third, second]);
-  assert.equal(state.httpClientSortDirection, 'asc');
-  appended.length = 0;
-  state.toggleHttpClientSort('duration');
-  assert.deepEqual(appended, [first, second, third]);
-  assert.equal(state.httpClientSort, 'execution');
-
-  const missingDuration = element(4, -1, true, false, 'post api.missing.test failed');
-  state.httpClientSort = 'duration';
-  state.httpClientSortDirection = 'desc';
-  assert.equal(state.compareHttpClientRequests(second, missingDuration), -1);
-  state.httpClientSortDirection = 'asc';
-  assert.equal(state.compareHttpClientRequests(first, missingDuration), -1);
-  state.httpClientSort = 'execution';
-  state.httpClientSortDirection = 'asc';
-
-  state.toggleHttpClientSort('duration');
-  state.setHttpClientFilter('failed');
-  assert.equal(first.hidden, true);
-  assert.equal(first.style.display, 'none');
-  assert.equal(second.hidden, true);
-  assert.equal(second.style.display, 'none');
-  assert.equal(third.hidden, false);
-  assert.equal(state.visibleHttpClientCount, 1);
-  assert.equal(state.httpClientSelected, 3);
-  assert.equal(state.httpClientSort, 'duration');
-
-  state.setHttpClientFilter('slow');
-  assert.equal(first.hidden, true);
-  assert.equal(second.hidden, false);
-  assert.equal(third.hidden, true);
-  assert.equal(state.visibleHttpClientCount, 1);
-  assert.equal(state.httpClientSelected, 2);
-
-  state.setHttpClientFilter('all');
-  assert.equal(first.hidden, false);
-  assert.equal(state.visibleHttpClientCount, 3);
-
-  state.httpClientSearch = '503';
-  state.applyHttpClientView();
-  assert.equal(first.hidden, true);
-  assert.equal(second.hidden, true);
-  assert.equal(third.hidden, false);
-  assert.equal(state.httpClientSelected, 3);
-  assert.equal(state.httpClientSort, 'duration');
-
-  state.httpClientDetailTab = 'source';
-  state.selectHttpClientRequest(1);
-  assert.equal(state.httpClientSelected, 1);
-  assert.equal(state.httpClientDetailOpen, true);
-  assert.equal(state.httpClientDetailTab, 'response');
-
-  state.selectHttpClientRequest(2);
-  assert.equal(state.httpClientSelected, 2);
-
-  state.setHttpClientDetailTab('request');
-  assert.equal(detailResets, 1);
-  state.setHttpClientDetailTab('source');
-  assert.equal(state.httpClientDetailTab, 'request');
-  assert.equal(detailResets, 1);
-  state.setHttpClientDetailTab('request');
-  state.setHttpClientDetailTab('invalid');
-  state.setHttpClientFilter('invalid');
-  state.toggleHttpClientSort('invalid');
-  state.selectHttpClientRequest(99);
-  assert.equal(state.httpClientDetailTab, 'request');
-  assert.equal(state.httpClientFilter, 'all');
-  assert.equal(state.httpClientSelected, 2);
-
-  assert.equal(state.formatHttpClientEvidence(null), '—');
-  assert.equal(state.formatHttpClientEvidence('raw body'), 'raw body');
-  assert.equal(state.formatHttpClientEvidence({ ready: true }), '{\n  "ready": true\n}');
+  assert.equal(full.callsite_label, 'app/Services/Trips.php:42');
+  assert.deepEqual(full.stack, [{ file: 'app/A.php', line: 3 }]);
+  assert.equal(full.has_source, true);
+  assert.deepEqual(
+    [full.request_has_headers, full.request_has_body, full.response_has_headers, full.response_has_body],
+    [true, true, false, true],
+  );
+  assert.equal(sparse.callsite_label, null);
+  assert.deepEqual(sparse.stack, []);
+  assert.equal(sparse.has_source, false);
+  assert.equal(sparse.request_has_body, false);
+  assert.equal(unnumbered.callsite_label, 'routes/web.php');
+  assert.equal(unnumbered.request_has_body, false);
+  assert.equal(keyed.callsite_label, 'routes/api.php');
+  assert.equal(keyed.has_source, true);
+  assert.deepEqual(normalizeHttpClientRequests(null), []);
+  assert.deepEqual(
+    normalizeHttpClientRequests({ first: { execution: 9 } }).map((item) => item.execution),
+    [9],
+  );
 });
 
-test('HTTP client defaults to all when no request failed or ran slowly', () => {
-  const { state, shell } = inspectorHarness('http_client', summary, runtime());
+test('HTTP client filters, searches, sorts, and keeps one visible selection', () => {
+  assert.deepEqual(httpClientFilterOptions(requests), [
+    ['all', 'All', 4],
+    ['failed', 'Failed', 2],
+    ['slow', 'Slow', 1],
+  ]);
+  assert.equal(matchesHttpClientRequest(requests[0]), true);
+  assert.equal(matchesHttpClientRequest({ execution: 5 }, { search: 'x' }), false);
 
-  state.httpClientSort = 'duration';
-  state.httpClientSortDirection = 'desc';
-  state.initializeHttpClient([{ execution: 4, failed: false, slow: false }]);
-  assert.equal(state.httpClientFilter, 'all');
-  assert.equal(state.httpClientSort, 'execution');
-  assert.equal(state.httpClientSortDirection, 'asc');
-  assert.equal(state.httpClientSelected, 4);
+  let view = httpClientView(requests, { selected: 1 });
+  assert.deepEqual(order(view), [1, 2, 3, 4]);
+  assert.equal(view.visibleCount, 4);
+  assert.equal(view.selected, 1);
 
-  state.initializeHttpClient('invalid');
-  assert.deepEqual(state.httpClientRequests, []);
-  assert.equal(state.httpClientSelected, null);
-  assert.equal(state.httpClientDetailOpen, false);
+  view = httpClientView(requests, { sort: 'duration', direction: 'desc', selected: 1 });
+  assert.deepEqual(order(view), [2, 3, 1, 4]);
+  view = httpClientView(requests, { sort: 'duration', direction: 'asc', selected: 1 });
+  assert.deepEqual(order(view), [1, 3, 2, 4]);
 
-  state.$refs = {};
-  state.applyHttpClientView();
-  assert.equal(state.visibleHttpClientCount, 0);
+  view = httpClientView(requests, { filter: 'failed', selected: 1 });
+  assert.deepEqual(visible(view), [3, 4]);
+  assert.equal(view.selected, 3);
+  view = httpClientView(requests, { filter: 'slow', selected: 3 });
+  assert.equal(view.selected, 2);
+  view = httpClientView(requests, { search: ' 503 ', selected: 1 });
+  assert.deepEqual(visible(view), [3]);
+  view = httpClientView(requests, { search: 'nothing matches' });
+  assert.equal(view.visibleCount, 0);
+  assert.equal(view.selected, null);
+  assert.equal(httpClientView([]).selected, null);
+
+  const tie = { execution: 9, duration_ms: 12 };
+  assert.equal(compareHttpClientRequests(requests[0], tie, 'duration', 'desc') < 0, true);
+  assert.equal(compareHttpClientRequests(requests[3], requests[0], 'duration', 'asc'), 1);
+  assert.equal(compareHttpClientRequests({}, {}, 'duration', 'asc'), 0);
+});
+
+test('HTTP client cycles the Time sort and ignores other columns', () => {
+  const off = { sort: 'execution', direction: 'asc' };
+  const slowest = nextHttpClientSort(off, 'duration');
+  const fastest = nextHttpClientSort(slowest, 'duration');
+
+  assert.deepEqual(slowest, { sort: 'duration', direction: 'desc' });
+  assert.deepEqual(fastest, { sort: 'duration', direction: 'asc' });
+  assert.deepEqual(nextHttpClientSort(fastest, 'duration'), off);
+  assert.deepEqual(nextHttpClientSort(slowest, 'status'), slowest);
+});
+
+test('HTTP client formats evidence, header counts, content types, and capture limits', () => {
+  assert.equal(formatHttpClientEvidence(null), '—');
+  assert.equal(formatHttpClientEvidence(undefined), '—');
+  assert.equal(formatHttpClientEvidence(''), '—');
+  assert.equal(formatHttpClientEvidence('raw body'), 'raw body');
+  assert.equal(formatHttpClientEvidence({ ready: true }), '{\n  "ready": true\n}');
+  assert.equal(httpClientHeaderCount({ accept: 'json', host: 'a', __truncated__: 3 }), 2);
+  assert.equal(httpClientHeaderCount('invalid'), 0);
+  assert.deepEqual(
+    httpClientContentTypes({
+      'Content-Type': ['application/json', 'charset=utf-8'],
+      'content-type': 'text/plain',
+      etag: 'x',
+    }),
+    [
+      ['Content-Type', 'application/json, charset=utf-8'],
+      ['content-type', 'text/plain'],
+    ],
+  );
+  assert.deepEqual(httpClientContentTypes(undefined), []);
+  assert.equal(httpClientBodyTruncated({ nested: '[maximum depth reached]' }), true);
+  assert.equal(httpClientBodyTruncated({ items: [1], __truncated__: 4 }), true);
+  assert.equal(httpClientBodyTruncated(undefined), false);
+  assert.equal(httpClientBodyTruncated({ ok: true }), false);
 });

@@ -168,64 +168,55 @@ test('selecting an inspector resets content and highlights its code', async () =
   assert.equal(highlighted, 1);
 });
 
-test('query findings reveal and scroll to grouped slow evidence', () => {
+test('a finding navigates to its inspector and delivers the filter once that inspector is mounted', () => {
   const state = createNewDebugBar(summary, runtime());
   const content = { scrollTop: 60 };
-  let requestedSelector = '';
-  let scrollOptions = null;
-  const group = {
-    dataset: {
-      ndbQueryKey: 'group-users',
-      ndbExecution: '1',
-      ndbDuration: '20',
-      ndbQueryType: 'read',
-      ndbAttention: 'true',
-      ndbSlow: 'true',
-      ndbRepeated: 'true',
-      ndbSearch: 'select users',
-      ndbQueryExecutionCount: '3',
-    },
-    hidden: false,
-    style: { removeProperty() {}, setProperty() {} },
-    scrollIntoView: (options) => {
-      scrollOptions = options;
-    },
-  };
-
-  state.$root = { querySelectorAll: () => [] };
-  const queries = state.createInspector('queries');
-  queries.queryRecords = [
-    {
-      key: 'group-users',
-      executions: [{ execution: 1, explain_available: true }],
-    },
-  ];
-  queries.$refs = {
-    content,
-    queryDetail: { scrollTo() {} },
-    queryList: {
-      querySelectorAll: () => [group],
-      appendChild() {},
-      querySelector: (selector) => {
-        requestedSelector = selector;
-
-        return group;
-      },
-    },
+  let headingFocused = 0;
+  const intents = [];
+  state.$root = {
+    querySelectorAll: () => [],
+    querySelector: (selector) =>
+      selector === '[data-ndb-inspector-heading]' ? { focus: () => headingFocused++ } : null,
   };
   state.$refs = { content };
-  queries.$nextTick = state.$nextTick = (callback) => callback();
-  queries.initialized = true;
-  queries.init();
+  state.$nextTick = (callback) => callback();
+  state.$wire = { loadInspector: async () => {} };
+  state.inspectorOpen = true;
 
-  state.selectInspector('queries', 'slow');
+  state.navigateToInspector('queries', 'slow');
 
-  assert.equal(queries.queryFilter, 'attention');
-  assert.equal(queries.querySelected, 'group-users');
-  assert.equal(queries.queryDetailOpen, true);
+  assert.equal(state.selected, 'queries');
   assert.equal(content.scrollTop, 0);
-  assert.match(requestedSelector, /data-ndb-slow/);
-  assert.deepEqual(scrollOptions, { block: 'nearest' });
+  assert.equal(headingFocused, 1);
+  assert.deepEqual(state.pendingInspectorIntent, {
+    profileId: state.summary.id,
+    inspector: 'queries',
+    filter: 'slow',
+  });
+
+  state.mountInspector(
+    'logs',
+    state.summary.id,
+    { initialized: true, receiveIntent: (f) => intents.push(['logs', f]) },
+    Symbol('logs'),
+  );
+  assert.deepEqual(intents, []);
+
+  state.mountInspector(
+    'queries',
+    state.summary.id,
+    { initialized: true, receiveIntent: (filter) => intents.push(['queries', filter]) },
+    Symbol('queries'),
+  );
+  assert.deepEqual(intents, [['queries', 'slow']]);
+  assert.equal(state.pendingInspectorIntent, null);
+
+  state.refreshInspector();
+  assert.deepEqual(intents, [['queries', 'slow']]);
+
+  state.navigateToInspector('missing');
+  assert.equal(state.selected, 'request');
+  assert.equal(state.pendingInspectorIntent, null);
 });
 
 test('sorting preserves groups and ignores invalid positions', () => {

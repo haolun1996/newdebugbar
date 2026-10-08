@@ -1,75 +1,120 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness, listRow } from './state-test-support.js';
+import {
+  cacheOperationDetails,
+  cacheResultWarns,
+  cacheSummary,
+  cacheView,
+  matchesCacheOperation,
+} from '../../resources/js/inspectors/cache.js';
 
-test('Cache filters searches and keeps a visible operation selected', () => {
-  const { state, shell } = inspectorHarness('cache', summary, runtime());
-  let detailResets = 0;
-  let contentResets = 0;
-  const element = (execution, category, failed, search) =>
-    listRow({
-      ndbCacheExecution: String(execution),
-      ndbCacheCategory: category,
-      ndbCacheFailed: String(failed),
-      ndbCacheSearchText: search,
-    });
-  const first = element(1, 'read', false, 'get hit trip alpha array');
-  const second = element(2, 'write', false, 'put stored trip beta redis');
-  const third = element(3, 'delete', true, 'forget failed trip stale database');
-  state.$refs = {
-    cacheList: {
-      children: [first, second, third],
+const operations = [
+  { execution: 1, category: 'read', failed: false, search: 'get hit trip alpha array' },
+  { execution: 2, category: 'write', failed: false, search: 'put stored trip beta redis' },
+  { execution: 3, category: 'delete', failed: true, search: 'forget failed trip stale database' },
+];
+const visible = (view) => view.rows.filter((row) => row.visible).map((row) => row.item.execution);
+
+test('Cache filters, searches, and keeps a visible operation selected', () => {
+  let view = cacheView(operations, { selected: 1 });
+  assert.deepEqual(visible(view), [1, 2, 3]);
+  assert.equal(view.visibleCount, 3);
+  assert.equal(view.selected, 1);
+
+  view = cacheView(operations, { filter: 'failed', selected: 1 });
+  assert.deepEqual(visible(view), [3]);
+  assert.equal(view.selected, 3);
+  assert.deepEqual(visible(cacheView(operations, { filter: 'writes', selected: 3 })), [2]);
+  assert.deepEqual(visible(cacheView(operations, { filter: 'reads' })), [1]);
+  assert.deepEqual(visible(cacheView(operations, { filter: 'deletes' })), [3]);
+  assert.deepEqual(visible(cacheView(operations, { search: ' ALPHA ' })), [1]);
+  assert.deepEqual(visible(cacheView(operations, { filter: 'unknown' })), []);
+
+  view = cacheView(operations, { search: 'nothing', selected: 2 });
+  assert.equal(view.visibleCount, 0);
+  assert.equal(view.selected, null);
+  assert.equal(cacheView([]).selected, null);
+  assert.equal(matchesCacheOperation({ execution: 4 }, { search: 'x' }), false);
+  assert.equal(matchesCacheOperation({ execution: 4 }), true);
+});
+
+test('Cache summarizes hit rate, filters, and attention', () => {
+  const figures = cacheSummary(
+    {
+      retained_count: 17,
+      reads: 5,
+      hits: 2,
+      misses: 3,
+      writes: 4,
+      forgets: 1,
+      flushes: 1,
+      failures: 3,
+      repeated_miss_count: 1,
+      hit_rate: 40,
+      high_miss_rate: true,
+      duration_ms: 2.5,
+      filter_counts: { failed: 3 },
     },
-    cacheDetail: { scrollTo: () => detailResets++ },
-    content: { scrollTo: () => contentResets++ },
-  };
-  state.$nextTick = (callback) => callback();
+    17,
+  );
 
-  state.initializeCache([
-    { execution: 1, key: 'trip:alpha' },
-    { execution: 2, key: 'trip:beta' },
-    { execution: 3, key: 'trip:stale', failed: true },
+  assert.equal(figures.countLabel, '17 operations');
+  assert.equal(figures.hitRateLabel, '40.0% hit rate');
+  assert.equal(figures.hitsLabel, '2 hits, 3 misses');
+  assert.equal(figures.highMissRate, true);
+  assert.equal(figures.durationMs, 2.5);
+  assert.deepEqual(figures.filters, [
+    ['all', 'All', 17],
+    ['reads', 'Reads', 5],
+    ['writes', 'Writes', 4],
+    ['deletes', 'Deletes', 2],
+    ['failed', 'Failed', 3],
   ]);
-  assert.equal(state.cacheFilter, 'all');
-  assert.equal(state.cacheSelected, 1);
-  assert.equal(state.cacheDetailOpen, false);
-  assert.equal(state.selectedCacheOperation.key, 'trip:alpha');
-  assert.equal(state.visibleCacheCount, 3);
+  assert.equal(figures.attention, '3 failed operations, 1 repeatedly missed key, 1 store flush.');
 
-  state.setCacheFilter('failed');
-  assert.equal(first.hidden, true);
-  assert.equal(second.hidden, true);
-  assert.equal(third.hidden, false);
-  assert.equal(state.cacheSelected, 3);
-  assert.equal(state.visibleCacheCount, 1);
+  const quiet = cacheSummary({ hits: 1, misses: 1, failures: 1, repeated_miss_count: 2, flushes: 2 }, 2);
+  assert.equal(quiet.countLabel, '2 operations');
+  assert.equal(quiet.hitsLabel, '1 hit, 1 miss');
+  assert.equal(quiet.attention, '1 failed operation, 2 repeatedly missed keys, 2 store flushes.');
 
-  state.setCacheFilter('writes');
-  assert.equal(second.hidden, false);
-  assert.equal(state.cacheSelected, 2);
+  const empty = cacheSummary(undefined, 1);
+  assert.equal(empty.countLabel, '1 operation');
+  assert.equal(empty.hitRateLabel, '0.0% hit rate');
+  assert.deepEqual(empty.filters, [['all', 'All', 1]]);
+  assert.equal(empty.attention, null);
+  assert.equal(empty.highMissRate, false);
+});
 
-  state.setCacheFilter('all');
-  state.cacheSearch = 'alpha';
-  state.applyCacheView();
-  assert.equal(first.hidden, false);
-  assert.equal(second.hidden, true);
-  assert.equal(third.hidden, true);
-  assert.equal(state.cacheSelected, 1);
+test('Cache marks warning results and chooses supporting details', () => {
+  assert.equal(cacheResultWarns({ result: 'miss' }), true);
+  assert.equal(cacheResultWarns({ result: 'flushed' }), true);
+  assert.equal(cacheResultWarns({ result: 'miss', failed: true }), false);
+  assert.equal(cacheResultWarns({ result: 'hit' }), false);
 
-  state.cacheSearch = '';
-  state.selectCacheOperation(3);
-  assert.equal(state.cacheSelected, 3);
-  assert.equal(state.cacheDetailOpen, true);
-  assert.equal(detailResets, 1);
-  assert.equal(contentResets, 1);
-
-  state.setCacheFilter('invalid');
-  state.selectCacheOperation(99);
-  assert.equal(state.cacheFilter, 'all');
-  assert.equal(state.cacheSelected, 3);
-
-  state.initializeCache('invalid');
-  assert.deepEqual(state.cacheOperations, []);
-  assert.equal(state.cacheSelected, null);
-  assert.equal(state.cacheDetailOpen, false);
+  assert.deepEqual(cacheOperationDetails({ operation: 'write', callsite: { file: 'app/A.php' } }), {
+    write: true,
+    batch: false,
+    failure: false,
+    any: true,
+    callsite: true,
+    source: true,
+  });
+  assert.deepEqual(cacheOperationDetails({ operation: 'read', duration_scope: 'batch', stack: [{}] }), {
+    write: false,
+    batch: true,
+    failure: false,
+    any: true,
+    callsite: false,
+    source: true,
+  });
+  assert.deepEqual(cacheOperationDetails({ failed: true, exception_message: 'Down', callsite: null }), {
+    write: false,
+    batch: false,
+    failure: true,
+    any: true,
+    callsite: false,
+    source: false,
+  });
+  assert.equal(cacheOperationDetails({ failed: true }).any, false);
 });

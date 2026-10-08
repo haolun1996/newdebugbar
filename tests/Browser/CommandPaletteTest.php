@@ -12,7 +12,7 @@ it('pins and shrinks an expanded inspector from the command palette', function (
         ->assertVisible('[data-ndb-corner-request]')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 return ! state.inspectorOpen && ! state.paletteOpen && state.barVisible;
             })()
             JS)
@@ -87,7 +87,7 @@ it('uses translucent command palette hover colors in :dataset mode', function (s
             (() => {
                 const command = document.querySelector('[data-ndb-command="inspector:request"]');
                 const background = getComputedStyle(command).backgroundColor;
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 const alpha = Number(
                     background.match(/\/\s*([\d.]+)\s*\)$/)?.[1]
                         ?? background.match(/,\s*([\d.]+)\s*\)$/)?.[1]

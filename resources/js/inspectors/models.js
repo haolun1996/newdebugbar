@@ -1,171 +1,145 @@
-/** Owns models inspector state and interactions. */
-export function createModels(context) {
-  const { browser } = context;
+/** Pure helpers for the models inspector: list sorting and filtering, and source labels. */
+
+const SORTS = ['model', 'retrieved', 'writes', 'reloads'];
+
+export const shortModelName = (model) =>
+  String(model ?? '')
+    .split('\\')
+    .pop();
+
+const text = (value) => (typeof value === 'string' && value !== '' ? value : '—');
+
+/** The list-row facts the Blade model-group component derived from one model group. */
+export function modelRow(group, index) {
+  const shortName = shortModelName(group.model);
+  const connection = text(group.connection);
+  const table = text(group.table);
+
   return {
-    refresh() {
-      this.initializeModels(this.$root?.querySelectorAll?.('[data-ndb-model-group]').length ?? 0);
-    },
-
-    modelGroupCount: 0,
-    modelSearch: '',
-    modelSort: 'capture',
-    modelSortDirection: 'asc',
-    visibleModelCount: 0,
-    modelSelected: null,
-    modelDetailOpen: false,
-    modelDetailTab: 'records',
-    modelListScrollTop: 0,
-
-    initializeModels(count) {
-      const normalized = Number(count);
-
-      this.modelGroupCount = Number.isInteger(normalized) && normalized > 0 ? normalized : 0;
-      if (this.initialized) {
-        this.$nextTick?.(() => this.applyModelView());
-        return;
-      }
-      this.initialized = true;
-      this.modelSearch = '';
-      this.modelSort = 'capture';
-      this.modelSortDirection = 'asc';
-      this.visibleModelCount = this.modelGroupCount;
-      this.modelSelected = null;
-      this.modelDetailOpen = false;
-      this.modelDetailTab = 'records';
-      this.modelListScrollTop = 0;
-    },
-
-    applyModelView() {
-      const list = this.$refs?.modelList;
-      const rows = [...(list?.querySelectorAll?.('[data-ndb-model-group]') ?? [])];
-      const search = this.modelSearch.toLowerCase().trim();
-      let visible = 0;
-
-      rows
-        .sort((left, right) => this.compareModels(left, right))
-        .forEach((row) => {
-          const matches = search === '' || row.dataset.ndbModelSearchValue?.includes(search);
-          row.hidden = !matches;
-
-          if (matches) {
-            row.style.removeProperty('display');
-            visible++;
-          } else {
-            row.style.setProperty('display', 'none', 'important');
-          }
-
-          list?.appendChild?.(row);
-        });
-
-      this.visibleModelCount = visible;
-
-      const selectedRow = rows.find((row) => Number(row.dataset.ndbModelIndex) === this.modelSelected);
-
-      if (Number.isInteger(this.modelSelected) && selectedRow?.hidden) {
-        this.modelSelected = null;
-        this.modelDetailOpen = false;
-        this.modelDetailTab = 'records';
-      }
-    },
-
-    toggleModelSort(sort) {
-      if (!['model', 'retrieved', 'writes', 'reloads'].includes(sort)) return;
-
-      const firstDirection = sort === 'model' ? 'asc' : 'desc';
-
-      if (this.modelSort !== sort) {
-        this.modelSort = sort;
-        this.modelSortDirection = firstDirection;
-      } else if (this.modelSortDirection === firstDirection) {
-        this.modelSortDirection = firstDirection === 'asc' ? 'desc' : 'asc';
-      } else {
-        this.modelSort = 'capture';
-        this.modelSortDirection = 'asc';
-      }
-
-      this.applyModelView();
-    },
-
-    compareModels(left, right) {
-      const captureComparison =
-        Number(left.dataset.ndbModelIndex ?? 0) - Number(right.dataset.ndbModelIndex ?? 0);
-
-      if (this.modelSort === 'capture') return captureComparison;
-
-      let comparison = 0;
-
-      if (this.modelSort === 'model') {
-        comparison = String(left.dataset.ndbModelSortName ?? '').localeCompare(
-          String(right.dataset.ndbModelSortName ?? ''),
-          undefined,
-          { numeric: true, sensitivity: 'base' },
-        );
-      } else {
-        const attribute = {
-          retrieved: 'ndbModelSortRetrieved',
-          writes: 'ndbModelSortWrites',
-          reloads: 'ndbModelSortReloads',
-        }[this.modelSort];
-        comparison = Number(left.dataset[attribute] ?? 0) - Number(right.dataset[attribute] ?? 0);
-      }
-
-      const directedComparison = this.modelSortDirection === 'asc' ? comparison : -comparison;
-
-      return directedComparison || captureComparison;
-    },
-
-    selectModelGroup(index) {
-      const selected = Number(index);
-
-      if (!Number.isInteger(selected) || selected < 0 || selected >= this.modelGroupCount) return;
-
-      this.modelListScrollTop = Math.max(
-        Number(this.$refs?.modelList?.scrollTop ?? 0),
-        Number(this.$refs?.content?.scrollTop ?? 0),
-      );
-      this.modelSelected = selected;
-      this.modelDetailOpen = true;
-      this.modelDetailTab = 'records';
-      this.$nextTick?.(() => {
-        this.$refs?.content?.scrollTo?.({ top: 0, behavior: 'instant' });
-        this.$refs?.modelDetail?.scrollTo?.({ top: 0, behavior: 'instant' });
-        const focus = () => this.$refs?.modelDetail?.focus?.({ preventScroll: true });
-
-        browser.afterPaint ? browser.afterPaint(focus) : focus();
-      });
-    },
-
-    setModelDetailTab(tab) {
-      if (!['records', 'source'].includes(tab)) return;
-
-      this.modelDetailTab = tab;
-      this.$nextTick?.(() => {
-        this.$refs?.modelDetail?.scrollTo?.({ top: 0, behavior: 'instant' });
-      });
-    },
-
-    closeModelDetail() {
-      const selected = this.modelSelected;
-
-      if (!Number.isInteger(selected) || !this.modelDetailOpen) return;
-
-      this.modelDetailOpen = false;
-      this.$nextTick?.(() => {
-        this.$refs?.modelList?.scrollTo?.({
-          top: this.modelListScrollTop,
-          behavior: 'instant',
-        });
-        this.$refs?.content?.scrollTo?.({
-          top: this.modelListScrollTop,
-          behavior: 'instant',
-        });
-        const focus = () =>
-          [...(this.$root?.querySelectorAll?.('[data-ndb-model-group]') ?? [])]
-            .find((row) => Number(row.dataset.ndbModelIndex) === selected)
-            ?.focus?.({ preventScroll: true });
-
-        browser.afterPaint ? browser.afterPaint(focus) : focus();
-      });
-    },
+    index,
+    group,
+    shortName,
+    connection,
+    table,
+    retrieved: Number(group.load_count ?? 0) || 0,
+    writes: Number(group.change_count ?? 0) || 0,
+    reloads: Number(group.repeated_load_count ?? 0) || 0,
+    sortName: shortName.toLowerCase(),
+    search: `${group.model} ${connection} ${table}`.toLowerCase(),
   };
 }
+
+/** The next sort after activating a heading: first direction, reversed, then back to capture order. */
+export function nextModelSort({ sort, direction }, heading) {
+  if (!SORTS.includes(heading)) return { sort, direction };
+
+  const first = heading === 'model' ? 'asc' : 'desc';
+
+  if (sort !== heading) return { sort: heading, direction: first };
+  if (direction === first) return { sort, direction: first === 'asc' ? 'desc' : 'asc' };
+
+  return { sort: 'capture', direction: 'asc' };
+}
+
+export function compareModelRows(left, right, { sort, direction }) {
+  const capture = left.index - right.index;
+
+  if (sort === 'capture' || !SORTS.includes(sort)) return capture;
+
+  const comparison =
+    sort === 'model'
+      ? left.sortName.localeCompare(right.sortName, undefined, { numeric: true, sensitivity: 'base' })
+      : left[sort] - right[sort];
+
+  return (direction === 'asc' ? comparison : -comparison) || capture;
+}
+
+/** Sorted rows that match the search. */
+export function visibleModelRows(rows, { search = '', sort = 'capture', direction = 'asc' } = {}) {
+  const needle = String(search).toLowerCase().trim();
+
+  return rows
+    .filter((row) => needle === '' || row.search.includes(needle))
+    .sort((left, right) => compareModelRows(left, right, { sort, direction }));
+}
+
+export const plural = (word, count) => (count === 1 ? word : `${word}s`);
+
+export const formatNumber = (value) => Number(value).toLocaleString('en-US');
+
+/** Laravel model event names as headlines, e.g. `forceDeleted` → `Force deleted`. */
+export function formatModelEvent(event) {
+  if (event === 'forceDeleted') return 'Force deleted';
+
+  return String(event)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+const isCallsite = (callsite) =>
+  callsite !== null &&
+  typeof callsite === 'object' &&
+  typeof callsite.file === 'string' &&
+  callsite.file !== '';
+
+const callsiteLine = (callsite) => {
+  const line = Number(callsite.line);
+
+  return callsite.line !== null && callsite.line !== '' && Number.isFinite(line) && Math.trunc(line) > 0
+    ? Math.trunc(line)
+    : null;
+};
+
+const isCompiledView = (callsite) =>
+  callsite?.kind === 'compiled_view' && typeof callsite.template_file === 'string';
+
+const basename = (path) => String(path).replaceAll('\\', '/').split('/').pop();
+
+export function sourceLocation(callsite) {
+  if (!isCallsite(callsite)) return null;
+
+  const line = callsiteLine(callsite);
+
+  return callsite.file + (line === null ? '' : `:${line}`);
+}
+
+export function sourceTitle(callsite) {
+  const exact = sourceLocation(callsite);
+
+  if (exact === null) return 'Source unavailable';
+  if (isCompiledView(callsite)) return `Blade ${callsite.template_file}, compiled ${exact}`;
+
+  return exact;
+}
+
+export function sourceShortLabel(callsite) {
+  if (!isCallsite(callsite)) return '—';
+  if (isCompiledView(callsite)) return basename(callsite.template_file);
+
+  const line = callsiteLine(callsite);
+
+  return basename(callsite.file) + (line === null ? '' : `:${line}`);
+}
+
+export function sourceCopy(callsite) {
+  if (callsite === null || typeof callsite !== 'object') return null;
+  if (isCompiledView(callsite)) return callsite.template_file;
+
+  return sourceLocation(callsite);
+}
+
+export function formatActivity(retrievals, changes) {
+  const parts = [];
+
+  if (retrievals > 0) parts.push(`${formatNumber(retrievals)} ${plural('retrieval', retrievals)}`);
+  if (changes > 0) parts.push(`${formatNumber(changes)} ${plural('write', changes)}`);
+
+  return parts.length === 0 ? 'No retained activity' : parts.join(', ');
+}
+
+export const isNumericKey = (key) =>
+  (typeof key === 'number' && Number.isFinite(key)) ||
+  (typeof key === 'string' && key.trim() !== '' && /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(key));

@@ -80,17 +80,9 @@ export function createPreferences(context) {
         delayOnTouchOnly: true,
         touchStartThreshold: 5,
         fallbackTolerance: 4,
-        // Drag previews must not become Alpine components or alter the host body.
-        onClone: ({ clone }) => clone.setAttribute('x-ignore', ''),
-        onStart: ({ item }) => {
-          item.parentElement.querySelectorAll('.ndb-inspector-drag').forEach((preview) => {
-            if (preview !== item) preview.setAttribute('x-ignore', '');
-          });
-        },
-        // Keep Alpine's order current so a profile refresh cannot undo a drag before drop.
+        // Commit each move as it happens so a profile refresh cannot undo a drag before drop.
         onChange: ({ item, newDraggableIndex }) =>
           this.sortInspector(item.dataset.ndbInspector, newDraggableIndex),
-        onEnd: null,
       };
     },
 

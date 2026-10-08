@@ -54,6 +54,10 @@ it('groups noisy Laravel events around application evidence', function () {
                     && document.querySelector('[data-ndb-event-list]').getAttribute('aria-label') === 'Laravel events';
             })()
             JS)
+        ->assertScript('document.querySelector("[data-ndb-event-source-control]").getBoundingClientRect().height === 36')
+        ->select('[data-ndb-event-source-control]', 'all')
+        ->assertValue('[data-ndb-event-source-control]', 'all')
+        // Every source renders its rows only while selected, so compare the option counts against all events.
         ->assertScript(<<<'JS'
             (() => {
                 const items = [...document.querySelectorAll('[data-ndb-event-item]')];
@@ -68,9 +72,6 @@ it('groups noisy Laravel events around application evidence', function () {
                 });
             })()
             JS)
-        ->assertScript('document.querySelector("[data-ndb-event-source-control]").getBoundingClientRect().height === 36')
-        ->select('[data-ndb-event-source-control]', 'all')
-        ->assertValue('[data-ndb-event-source-control]', 'all')
         ->assertScript(<<<'JS'
             (() => {
                 const visible = [...document.querySelectorAll('[data-ndb-event-item]:not([hidden])')];

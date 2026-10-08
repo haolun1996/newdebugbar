@@ -1,11 +1,9 @@
 <?php
 
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Blade;
-use Livewire\Livewire;
 use NewDebugBar\Analysis\QueryAnalyzer;
-use NewDebugBar\Livewire\DebugBar;
 use NewDebugBar\Presentation\ProfilePresenter;
+use NewDebugBar\Presentation\QueryRecordPresenter;
 use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Support\QueryExplainer;
 
@@ -32,18 +30,12 @@ it('offers runnable SQL and runs manual SQLite explain with the default bindings
         ->mode->toBe('EXPLAIN QUERY PLAN')
         ->rows->not->toBeEmpty();
 
-    Livewire::test(DebugBar::class, ['profileId' => $id])
-        ->call('loadInspector', 'queries')
-        ->call('explainQuery', 1)
-        ->assertSet('queryExplains.1.driver', 'sqlite')
-        ->assertSet('queryExplainErrors', [])
-        ->assertDispatched('newdebugbar-query-explained', function (string $name, array $params) use ($id): bool {
-            return $name === 'newdebugbar-query-explained'
-                && $params['profileId'] === $id
-                && $params['execution'] === 1
-                && $params['explain']['driver'] === 'sqlite'
-                && $params['error'] === null;
-        });
+    $this->postJson("/__newdebugbar/api/profiles/{$id}/queries/1/explain", headers: ['X-NewDebugBar' => '1'])
+        ->assertOk()
+        ->assertJsonPath('execution', 1)
+        ->assertJsonPath('explain.driver', 'sqlite')
+        ->assertJsonPath('explain.mode', 'EXPLAIN QUERY PLAN')
+        ->assertJsonPath('error', null);
 });
 
 it('rejects unsafe incomplete and mutating explain requests before touching the database', function (array $query) {
@@ -154,12 +146,7 @@ it('keeps repeated execution evidence in one bounded workspace record', function
         'payload' => $analysis,
     ];
 
-    $html = Blade::render('<x-newdebugbar::query-inspector :inspector="$inspector" />', ['inspector' => $inspector]);
-
-    expect(preg_match('/<script type="application\/json" data-ndb-query-payload>\s*(?<payload>[^<]+)\s*<\/script>/', $html, $matches))
-        ->toBe(1);
-
-    $records = json_decode(base64_decode(trim($matches['payload']), true), true, 512, JSON_THROW_ON_ERROR);
+    $records = app(QueryRecordPresenter::class)->present($inspector['payload']);
 
     expect($records)
         ->toHaveCount(1)
@@ -174,13 +161,6 @@ it('keeps repeated execution evidence in one bounded workspace record', function
         ->and($records[0]['executions'][2]['source_label'])->toBe('/app/Queries/NumberQuery.php:14')
         ->and($records[0]['executions'][2]['stack'][0]['function'])->toBe('loadNumbers')
         ->and($records[0]['executions'][2]['display_sql_complete'])->toBeTrue();
-
-    expect($html)
-        ->toContain('data-ndb-query-workspace')
-        ->toContain('data-ndb-query-group="group-')
-        ->toContain('data-ndb-query-detail')
-        ->toContain('data-ndb-inspector-disclosure')
-        ->not->toContain('data-ndb-query-group-executions');
 });
 
 it('formats query durations with an adaptive unit', function () {
@@ -207,36 +187,8 @@ it('formats query durations with an adaptive unit', function () {
         'summary' => ['count' => count($items), 'total_time_ms' => 1466.04],
         'payload' => ['items' => $items, 'repeated_groups' => []],
     ];
-    $html = Blade::render('<x-newdebugbar::query-inspector :inspector="$inspector" />', ['inspector' => $inspector]);
-
-    expect(preg_match('/<script type="application\/json" data-ndb-query-payload>\s*(?<payload>[^<]+)\s*<\/script>/', $html, $matches))
-        ->toBe(1);
-
-    $records = json_decode(base64_decode(trim($matches['payload']), true), true, 512, JSON_THROW_ON_ERROR);
+    $records = app(QueryRecordPresenter::class)->present($inspector['payload']);
 
     expect(array_column($records, 'duration_label'))
-        ->toBe(['0 µs', '190 µs', '990 µs', '1 ms', '12.34 ms', '999.99 ms', '1 s', '1.45 s'])
-        ->and($html)
-        ->toContain('1.47 s total');
-});
-
-it('gives a slow repeated query the stronger row treatment', function () {
-    $queries = array_map(fn (int $duration): array => [
-        'sql' => 'select ? as number',
-        'bindings' => [$duration],
-        'duration_ms' => $duration,
-        'connection' => 'testing',
-        'driver' => 'sqlite',
-    ], [120, 20, 10]);
-    $analysis = (new QueryAnalyzer)->analyze($queries, 200);
-    $inspector = [
-        'summary' => [...$analysis['summary'], 'count' => 3],
-        'payload' => $analysis,
-    ];
-    $html = Blade::render('<x-newdebugbar::query-inspector :inspector="$inspector" />', ['inspector' => $inspector]);
-
-    expect($html)
-        ->toContain('Slow repeated query.')
-        ->toContain('ndb:bg-red-50\/70', 'ndb:bg-red-50\/90')
-        ->not->toContain('ndb:bg-amber-50\/70', 'ndb:bg-amber-50\/90');
+        ->toBe(['0 µs', '190 µs', '990 µs', '1 ms', '12.34 ms', '999.99 ms', '1 s', '1.45 s']);
 });

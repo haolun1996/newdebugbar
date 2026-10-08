@@ -33,8 +33,6 @@ final class RequestEligibility
             return false;
         }
 
-        $hostMessage = false;
-
         foreach ($messages as $message) {
             if (! is_array($message) || ! is_string($message['snapshot'] ?? null)) {
                 return false;
@@ -51,13 +49,9 @@ final class RequestEligibility
             if (! is_string($name) || $name === '') {
                 return false;
             }
-
-            if ($name !== 'newdebugbar.toolbar') {
-                $hostMessage = true;
-            }
         }
 
-        return $hostMessage;
+        return true;
     }
 
     private function isLivewireAsset(Request $request): bool

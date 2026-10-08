@@ -102,7 +102,7 @@ it('keeps mobile metric values readable across duration formats', function (int 
             $label = DurationFormatter::format($duration);
             $summary = json_encode(['duration_label' => $label, 'query_count' => 999, 'peak_memory_mb' => 128.25], JSON_THROW_ON_ERROR);
 
-            $page->script("Object.assign(Alpine.\$data(document.getElementById('newdebugbar')).summary, {$summary})");
+            $page->script("Object.assign(newDebugBarData(document.getElementById('newdebugbar')).summary, {$summary})");
 
             $page->assertScript("document.querySelector('[data-ndb-mobile-request-metrics=\"{$scope}\"] [data-ndb-mobile-toolbar-summary=\"duration\"]').textContent", $label);
 

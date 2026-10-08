@@ -166,6 +166,8 @@ it('selects and inspects mail with a real in-panel preview', function () {
         ->click('[data-ndb-mail-actions-trigger]')
         ->assertAttribute('[data-ndb-mail-actions-trigger]', 'aria-expanded', 'true')
         ->assertVisible('[data-ndb-mail-actions-menu]')
+        ->assertSeeIn('[data-ndb-mail-open-preview]', 'Open preview')
+        ->assertSeeIn('[data-ndb-mail-download]', 'Download .EML')
         ->assertScript(<<<'JS'
             (() => {
                 const actions = document.querySelector('[data-ndb-mail-actions]');
@@ -254,7 +256,7 @@ it('selects and inspects mail with a real in-panel preview', function () {
         ->assertScript('getComputedStyle(document.querySelector("[data-ndb-mail-preview-controls]")).display === "none"')
         ->assertSee('receipt-NS-1042.pdf')
         ->assertSee('application/pdf')
-        ->assertSee('Download')
+        ->assertSeeIn('[data-ndb-mail-attachment-download]', 'Download')
         ->assertVisible('[data-ndb-mail-attachment-download]')
         ->assertAttribute('[data-ndb-mail-attachment-download]', 'download', 'receipt-NS-1042.pdf')
         ->assertScript('document.querySelector("[data-ndb-mail-attachment-download]").getAttribute("href").endsWith("/0/attachment/0")')

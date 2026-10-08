@@ -24,25 +24,69 @@ it('preserves Laravel original response metadata while injecting HTML', function
     app(BarInjector::class)->inject($response, (string) Str::uuid());
 
     expect($response->getOriginalContent())->toBe($view)
-        ->and($response->getContent())->toContain('id="newdebugbar"');
+        ->and($response->getContent())->toContain('id="newdebugbar-mount"');
 });
 
-it('loads the toolbar state before Livewire starts Alpine', function () {
-    $response = response('<!doctype html><html><body>Application response</body></html>');
+it('injects the mount point, boot data, and package script without Livewire assets', function () {
+    $response = response('<!doctype html><html><head><title>Plain host</title></head><body>Application response</body></html>');
+    $id = (string) Str::uuid();
 
-    app(BarInjector::class)->inject($response, (string) Str::uuid());
+    app(BarInjector::class)->inject($response, $id);
 
     $content = $response->getContent();
-    $debugBarScript = strpos($content, '/__newdebugbar/assets/newdebugbar.js');
-    $toolbar = strpos($content, 'id="newdebugbar"');
-    $livewireScript = strpos($content, 'data-update-uri=');
+    $stylesheet = strpos($content, '/__newdebugbar/assets/newdebugbar.css');
+    $mount = strpos($content, '<div id="newdebugbar-mount"');
+    $boot = strpos($content, '<script type="application/json" id="newdebugbar-boot">');
+    $script = strpos($content, '/__newdebugbar/assets/newdebugbar.js');
 
-    expect($debugBarScript)->toBeInt()
-        ->and($toolbar)->toBeInt()
-        ->and($livewireScript)->toBeInt()
-        ->and($debugBarScript)->toBeLessThan($toolbar)
-        ->and($toolbar)->toBeLessThan($livewireScript);
+    expect($stylesheet)->toBeInt()->toBeLessThan(strpos($content, '</head>'))
+        ->and($mount)->toBeInt()->toBeGreaterThan(strpos($content, 'Application response'))
+        ->and($boot)->toBeInt()->toBeGreaterThan($mount)
+        ->and($script)->toBeInt()->toBeGreaterThan($boot)
+        ->and($script)->toBeLessThan(strpos($content, '</body>'))
+        ->and(substr_count($content, '<script'))->toBe(2)
+        ->and(substr_count($content, '<link'))->toBe(1)
+        ->and($content)->not->toContain('livewire.js', 'livewire.min.js', '<!-- Livewire', 'data-update-uri', 'x-cloak', 'wire:')
+        ->and(newDebugBarBootData($content))
+        ->summary->id->toBe($id)
+        ->profile_limit->toBe(app(ProfileStore::class)->maxProfiles())
+        ->api->toBe(url('/__newdebugbar/api'));
 });
+
+it('keeps hostile profile text inert inside the boot data', function () {
+    $id = (string) Str::uuid();
+    $path = '/trips/</script><script>alert(1)</script><!--$1\\0${1}\'"&';
+    app(ProfileStore::class)->put([
+        'id' => $id,
+        'environment' => 'testing',
+        'metrics' => ['duration_ms' => 1],
+        'inspectors' => [
+            'request' => [
+                'label' => 'Request',
+                'summary' => ['method' => 'GET', 'status' => 200],
+                'payload' => ['method' => 'GET', 'status' => 200, 'path' => $path, 'action' => 'App\\Http\\Controllers\\TripController@show'],
+            ],
+        ],
+    ]);
+    $response = response('<!doctype html><html><head></head><body>Host</body></html>');
+
+    app(BarInjector::class)->inject($response, $id);
+
+    $content = $response->getContent();
+
+    expect(substr_count($content, '<script'))->toBe(2)
+        ->and(substr_count($content, '</script>'))->toBe(2)
+        ->and($content)->not->toContain('<!--', 'alert(1)</script>')
+        ->and(newDebugBarBootData($content))->summary->path->toBe($path);
+});
+
+/** @return array<string, mixed> */
+function newDebugBarBootData(string $html): array
+{
+    preg_match('#<script type="application/json" id="newdebugbar-boot">(.*?)</script>#s', $html, $matches);
+
+    return json_decode($matches[1] ?? 'null', true, flags: JSON_THROW_ON_ERROR);
+}
 
 it('serves its compiled assets through local package routes', function () {
     $response = $this->get('/__newdebugbar/assets/newdebugbar.css')
@@ -62,15 +106,15 @@ it('injects assets into an html document that has no head', function () {
     $this->get('/html-without-head', ['Accept' => 'text/html'])
         ->assertOk()
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertSeeInOrder(['<html><head>', '<style id="newdebugbar-critical-css"', '</head>'], false)
-        ->assertSee('id="newdebugbar"', false);
+        ->assertSeeInOrder(['<html><head>', '<link rel="stylesheet" href="http://localhost/__newdebugbar/assets/newdebugbar.css', '</head>'], false)
+        ->assertSee('id="newdebugbar-mount"', false);
 });
 
 it('leaves response types that cannot host the bar untouched', function (string $path, int $status) {
     $response = $this->get($path, ['Accept' => 'text/html'])
         ->assertStatus($status)
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertDontSee('id="newdebugbar"', false);
+        ->assertDontSee('id="newdebugbar-mount"', false);
 
     $profile = app(ProfileStore::class)->get($response->headers->get('X-NewDebugBar-Profile'));
 
@@ -89,14 +133,14 @@ it('profiles an html error response', function () {
     $this->get('/failed-html', ['Accept' => 'text/html'])
         ->assertUnprocessable()
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertSee('id="newdebugbar"', false);
+        ->assertSee('id="newdebugbar-mount"', false);
 });
 
 it('preserves a profile when the application throws', function () {
     $response = $this->get('/profiled-exception', ['Accept' => 'text/html'])
         ->assertInternalServerError()
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertSee('id="newdebugbar"', false);
+        ->assertSee('id="newdebugbar-mount"', false);
 
     $profile = app(ProfileStore::class)->get($response->headers->get('X-NewDebugBar-Profile'));
 
@@ -126,7 +170,7 @@ it('profiles JSON without changing its body or injecting the toolbar', function 
         ->assertOk()
         ->assertExactJson(['ready' => true])
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertDontSee('id="newdebugbar"', false);
+        ->assertDontSee('id="newdebugbar-mount"', false);
 
     $profile = app(ProfileStore::class)->get($response->headers->get('X-NewDebugBar-Profile'));
 
@@ -148,12 +192,12 @@ it('profiles API AJAX redirect streamed and binary responses without body inject
         ->assertOk()
         ->assertContent('<div data-fragment>Search result</div>')
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertDontSee('id="newdebugbar"', false);
+        ->assertDontSee('id="newdebugbar-mount"', false);
 
     $redirect = $this->get('/profile-redirect', ['Accept' => 'text/html'])
         ->assertRedirect('/profiled')
         ->assertHeader('X-NewDebugBar-Profile')
-        ->assertDontSee('id="newdebugbar"', false);
+        ->assertDontSee('id="newdebugbar-mount"', false);
 
     $stream = $this->get('/streamed-response', ['Accept' => 'text/plain'])
         ->assertOk()

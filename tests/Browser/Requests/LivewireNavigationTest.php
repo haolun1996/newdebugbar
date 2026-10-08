@@ -1,7 +1,7 @@
 <?php
 
 it('keeps package asset updates inside Livewire navigation', function () {
-    $page = visit('/profiled');
+    $page = visit('/profiled-navigate');
 
     $page->script(<<<'JS'
         window.__newDebugBarNavigationSentinel = true;
@@ -14,6 +14,7 @@ it('keeps package asset updates inside Livewire navigation', function () {
         ->waitForText('Second request')
         ->assertScript('window.__newDebugBarNavigationSentinel === true')
         ->assertCount('#newdebugbar', 1)
+        ->assertScript("newDebugBarData(document.getElementById('newdebugbar'))?.summary.path === '/profiled-navigate-next'")
         ->assertNoJavaScriptErrors();
 });
 
@@ -24,7 +25,7 @@ it('keeps the Livewire inspector available after host updates and request inspec
         ->assertSeeIn('[data-testid="host-counter-value"]', '1')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
 
                 return state.summary.path === '/profiled-livewire'
                     && state.laterRequestCount === 1
@@ -49,7 +50,7 @@ it('keeps the Livewire inspector available after host updates and request inspec
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
 
                 return /^\/livewire-[0-9a-f]{8}\/update$/i.test(state.summary.path)
                     && state.inspectorOpen === true

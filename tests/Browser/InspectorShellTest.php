@@ -15,7 +15,7 @@ it('alphabetizes active inspectors and keeps quiet inspectors in the palette', f
         ->assertDontSee('quiet hidden')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 const visible = state.orderedInspectors.filter((inspector) => state.isInspectorVisible(inspector));
 
                 return visible.length < state.summary.inspectors.length
@@ -71,7 +71,7 @@ it('removes Overview from navigation and opens Requests by default', function ()
         ->assertMissing('[data-ndb-overview-runtime]')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
 
                 return state.selected === 'request'
                     && state.selectedInspector.label === 'Requests'

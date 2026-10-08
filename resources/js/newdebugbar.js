@@ -3,10 +3,9 @@ import hljs from 'highlight.js/lib/core';
 import http from 'highlight.js/lib/languages/http';
 import json from 'highlight.js/lib/languages/json';
 import sql from 'highlight.js/lib/languages/sql';
-import { installCsrfRecovery } from './csrf-recovery.js';
 import { installLivewireTrace } from './livewire-trace.js';
 import { installProfileDiscoveryBridge, installRequestDiscovery } from './request-discovery.js';
-import { createNewDebugBar } from './state.js';
+import { mountNewDebugBar } from './app/mount.jsx';
 
 const php = (language) => ({
   name: 'PHP',
@@ -48,8 +47,13 @@ window.newDebugBarHighlight = (root = document) => {
 
 const livewireTrace = installLivewireTrace();
 
-window.newDebugBar = (summary, profileLimit) => createNewDebugBar(summary, null, [], profileLimit, livewireTrace);
+const mount = () => mountNewDebugBar({ livewireTrace });
 
-installCsrfRecovery();
 installProfileDiscoveryBridge();
 installRequestDiscovery();
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
+else mount();
+
+// Host navigation that swaps the page body brings a new mount point and profile.
+['livewire:navigated', 'turbo:load', 'inertia:navigate'].forEach((name) => document.addEventListener(name, mount));

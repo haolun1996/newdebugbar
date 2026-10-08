@@ -1,11 +1,9 @@
 import { PROFILE_PATTERN } from '../../shell/requests.js';
 import { formatDuration } from '../../duration.js';
-import { createTraceHelp } from './trace-help.js';
 
 /** Owns livewire activity inspector state and interactions. */
 export function createActivity(context) {
   const { browser, shell } = context;
-  const summary = shell.summary;
   return {
     livewireActivityType: 'all',
     livewireSelectedActivityId: null,
@@ -14,7 +12,6 @@ export function createActivity(context) {
     livewireClock: browser.now?.() ?? Date.now(),
     livewireClockTimer: null,
     livewireClockRunning: false,
-    livewireTraceHelp: createTraceHelp,
 
     get livewireActivity() {
       const currentProfileId = PROFILE_PATTERN.test(shell.summary?.id ?? '') ? shell.summary.id : null;
@@ -198,7 +195,6 @@ export function createActivity(context) {
       this.livewireSelectedActivityId = id;
       this.livewireActivitySelectionPinned = true;
       this.livewireDetailOpen = true;
-      this.$nextTick?.(() => browser.highlight?.());
     },
 
     livewireActivityComponent(item) {

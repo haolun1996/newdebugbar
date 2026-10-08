@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
-use Livewire\Drawer\Utils;
 use NewDebugBar\ProfileManager;
 use NewDebugBar\Storage\ProfileStore;
 
@@ -21,7 +20,7 @@ it('stops the request feedback loop when Laravel Debugbar is also active', funct
     });
 
     // Its response protocol adds phpdebugbar-id to application responses,
-    // including our Livewire toolbar updates, but not its own storage responses.
+    // including our debug bar API responses, but not its own storage responses.
     Event::listen(RequestHandled::class, function (RequestHandled $event) {
         if (! $event->request->is(config('debugbar.route_prefix').'*')) {
             $event->response->headers->set('phpdebugbar-id', (string) Str::ulid());
@@ -29,32 +28,20 @@ it('stops the request feedback loop when Laravel Debugbar is also active', funct
     });
 
     $host = $this->get('/profiled')->assertOk();
-    $toolbar = (string) app('livewire')->mount('newdebugbar.toolbar', [
-        'profileId' => $host->headers->get('X-NewDebugBar-Profile'),
-    ]);
-    $snapshot = Utils::extractAttributeDataFromHtml($toolbar, 'wire:snapshot');
     $storedBefore = count(File::files(config('newdebugbar.storage.path')));
-    $updateUri = app('livewire')->getUpdateUri();
     $openUri = '/'.ltrim(trim($prefix, '/').'/open', '/');
     $requests = [];
-    $call = ['method' => 'loadInspector', 'params' => ['request']];
+    $apiUri = '/__newdebugbar/api/profiles/'.$host->headers->get('X-NewDebugBar-Profile').'/inspectors/request';
 
     // Replay both clients' header-driven discovery, capped so a regression
     // records the repeating requests instead of hanging the test runner.
     for ($attempt = 0; $attempt < 4; $attempt++) {
-        $requests[] = 'update';
-        $update = $this->postJson($updateUri, [
-            'components' => [[
-                'snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
-                'updates' => [],
-                'calls' => [$call],
-            ]],
-        ], ['X-Livewire' => '1'])->assertOk()->assertHeader('phpdebugbar-id');
-        $snapshot = json_decode($update->json('components.0.snapshot'), true, flags: JSON_THROW_ON_ERROR);
+        $requests[] = 'api';
+        $api = $this->getJson($apiUri)->assertOk()->assertHeader('phpdebugbar-id');
 
         // PHP Debugbar v3.8.0 AjaxHandler.loadFromId -> OpenHandler.load.
         $requests[] = 'open';
-        $legacyId = $update->headers->get('phpdebugbar-id');
+        $legacyId = $api->headers->get('phpdebugbar-id');
         $open = $this->getJson($openUri.'?'.http_build_query(['op' => 'get', 'id' => $legacyId]))
             ->assertOk()
             ->assertExactJson(['__meta' => ['id' => $legacyId]]);
@@ -64,11 +51,11 @@ it('stops the request feedback loop when Laravel Debugbar is also active', funct
             break;
         }
 
-        // New Debug Bar's discovery bridge calls noticeProfile for each new ID.
-        $call = ['method' => 'noticeProfile', 'params' => [$profileId]];
+        // New Debug Bar's discovery bridge asks for a summary of each new ID.
+        $apiUri = '/__newdebugbar/api/profiles/'.$profileId.'/notice';
     }
 
-    expect($requests)->toBe(['update', 'open'])
+    expect($requests)->toBe(['api', 'open'])
         ->and(count(File::files(config('newdebugbar.storage.path'))))->toBe($storedBefore)
         ->and(app(ProfileManager::class)->isCollecting())->toBeFalse();
 

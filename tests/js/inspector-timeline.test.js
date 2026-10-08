@@ -1,189 +1,171 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness } from './state-test-support.js';
+import {
+  DEFAULT_TIMELINE_QUERY,
+  TIMELINE_PAGE_SIZE,
+  createRequestGate,
+  filteredTimelineQuery,
+  nextTimelinePageQuery,
+  sameTimelineQuery,
+  timelineItemView,
+  timelineQuery,
+  timelineSourceOptions,
+  timelineSummary,
+  titleCase,
+} from '../../resources/js/inspectors/timeline.js';
 
-test('timeline filters request the full capture and preserve detail navigation', async () => {
-  const browser = runtime();
-  const { state, shell } = inspectorHarness(
-    'timeline',
-    {
-      ...summary,
-      inspectors: [
-        ...summary.inspectors,
-        { key: 'timeline', label: 'Timeline' },
-        { key: 'events', label: 'Events' },
-      ],
-    },
-    browser,
-  );
-  let rowFocuses = 0;
-  let detailFocuses = 0;
-  const item = (id, inspector, search, key = false) => ({
-    dataset: {
-      ndbTimelineItem: id,
-      ndbTimelineInspector: inspector,
-      ndbTimelineInspectorLabel: inspector === 'queries' ? 'Queries' : 'Events',
-      ndbTimelineKind: inspector === 'queries' ? 'Duration' : 'Event',
-      ndbTimelineLabel: search,
-      ndbTimelineAt: '12.5',
-      ndbTimelineAtLabel: '12.5 ms',
-      ndbTimelineStart: inspector === 'queries' ? '10' : '',
-      ndbTimelineStartLabel: inspector === 'queries' ? '10 ms' : '',
-      ndbTimelineDuration: inspector === 'queries' ? '2.5' : '',
-      ndbTimelineDurationLabel: inspector === 'queries' ? '2.5 ms' : '',
-      ndbTimelineSource: inspector === 'queries' ? 'app/Trips/LoadTrip.php:24' : '',
-      ndbTimelineSearchValue: search,
-      ndbTimelineKey: String(key),
-    },
-    hidden: false,
-    focus: () => rowFocuses++,
+test('timeline queries page by fifty and restart from the first page after filtering', () => {
+  assert.equal(TIMELINE_PAGE_SIZE, 50);
+  assert.deepEqual(timelineQuery({ filter: 'queries', search: 'users', limit: 100 }), {
+    filter: 'queries',
+    search: 'users',
+    limit: 100,
   });
-  const query = item('queries-0', 'queries', 'select users', true);
-  const event = item('events-0', 'events', 'clinic ready');
-  let rows = [query, event];
-  const requests = [];
-  state.$wire = { filterTimeline: async (...args) => requests.push(args) };
-  state.$refs = {
-    timelineList: {
-      querySelectorAll(selector) {
-        return selector.includes(':not([hidden])') ? rows.filter((row) => !row.hidden) : rows;
-      },
-    },
-    timelineDetail: { focus: () => detailFocuses++ },
-    content: { scrollTop: 19 },
-  };
-  state.$nextTick = (callback) => callback();
+  assert.deepEqual(timelineQuery(null), DEFAULT_TIMELINE_QUERY);
+  assert.deepEqual(timelineQuery({ filter: 3, limit: 0 }), DEFAULT_TIMELINE_QUERY);
 
-  await state.setTimelineFilter('queries');
-  assert.deepEqual(requests, [['queries', '']]);
-  // The response morph supplies only the matching page.
-  rows = [query];
-  state.syncTimelineSelection();
-
-  state.selectTimelineItem('queries-0');
-  assert.equal(state.timelineDetailOpen, true);
-  assert.equal(state.selectedTimelineItem.label, 'select users');
-  assert.equal(state.selectedTimelineItem.durationLabel, '2.5 ms');
-  assert.equal(state.selectedTimelineItem.source, 'app/Trips/LoadTrip.php:24');
-  assert.equal(detailFocuses, 1);
-  assert.equal(state.$refs.content.scrollTop, 0);
-
-  let restoreTimelineFocus;
-  browser.afterPaint = (callback) => {
-    restoreTimelineFocus = callback;
-  };
-
-  state.closeTimelineDetail();
-  assert.equal(state.timelineDetailOpen, false);
-  assert.equal(rowFocuses, 0);
-  restoreTimelineFocus();
-  assert.equal(rowFocuses, 1);
-
-  state.timelineSearch = 'MISSING';
-  await state.applyTimelineFilters();
-  assert.deepEqual(requests.at(-1), ['queries', 'MISSING']);
-  rows = [];
-  state.syncTimelineSelection();
-  assert.equal(state.timelineSelected, null);
-  assert.equal(state.timelineDetailOpen, false);
-
-  state.setTimelineFilter('unknown');
-  assert.equal(state.timelineFilter, 'queries');
-  state.$wire.filterTimeline = async () => {
-    throw new Error('unavailable');
-  };
-  await state.applyTimelineFilters();
-  assert.equal(state.timelineFiltering, false);
-  assert.equal(state.timelineFilterError, true);
+  const second = nextTimelinePageQuery(DEFAULT_TIMELINE_QUERY);
+  assert.deepEqual(second, { filter: 'key', search: '', limit: 100 });
+  assert.equal(nextTimelinePageQuery(second).limit, 150);
+  assert.deepEqual(filteredTimelineQuery('logs', 'event 119'), {
+    filter: 'logs',
+    search: 'event 119',
+    limit: 50,
+  });
+  assert.equal(sameTimelineQuery(DEFAULT_TIMELINE_QUERY, { filter: 'key', search: '', limit: 50 }), true);
+  assert.equal(sameTimelineQuery(DEFAULT_TIMELINE_QUERY, second), false);
+  assert.equal(sameTimelineQuery(DEFAULT_TIMELINE_QUERY, { ...second, limit: 50, search: 'x' }), false);
+  assert.equal(sameTimelineQuery(DEFAULT_TIMELINE_QUERY, { ...second, limit: 50, filter: 'all' }), false);
 });
 
-test('timeline loads bounded pages near the scroll end and exposes retry state', async () => {
-  const browser = runtime();
-  const observers = [];
-  let cleanups = 0;
-  browser.observeNearEnd = (target, scrollOwner, callback) => {
-    observers.push({ target, scrollOwner, callback });
-
-    return () => cleanups++;
-  };
-
-  const { state, shell } = inspectorHarness(
-    'timeline',
-    {
-      ...summary,
-      inspectors: [...summary.inspectors, { key: 'timeline', label: 'Timeline' }],
-    },
-    browser,
+test('timeline sources and labels use Laravel title case', () => {
+  assert.equal(titleCase('http_client'), 'Http Client');
+  assert.equal(titleCase('QUEUE_job'), 'Queue Job');
+  assert.equal(titleCase(null), '');
+  assert.deepEqual(
+    timelineSourceOptions({ available_inspectors: ['request', 'queries', 'http_client'], items: [] }),
+    [
+      { value: 'queries', label: 'Queries' },
+      { value: 'http_client', label: 'Http Client' },
+    ],
   );
-  const scrollOwner = {};
-  const firstSentinel = { isConnected: true };
-  const nextSentinel = { isConnected: true };
-  let resolvePage;
-  let pageCalls = 0;
-  const scopedWire = {
-    loadMoreTimeline() {
-      pageCalls++;
+  assert.deepEqual(
+    timelineSourceOptions({
+      items: [{ inspector: 'logs' }, { inspector: 'logs' }, { inspector: 'request' }],
+    }),
+    [{ value: 'logs', label: 'Logs' }],
+  );
+  assert.deepEqual(timelineSourceOptions(undefined), []);
+});
 
-      return new Promise((resolve) => {
-        resolvePage = resolve;
-      });
-    },
-  };
-  const wire = {
-    $island(name) {
-      assert.equal(name, 'inspector-details');
+test('timeline summaries describe loaded, matching, and remaining activity', () => {
+  const items = Array.from({ length: 50 }, (_, index) => ({ id: `logs-${index}`, at_ms: index }));
+  const paged = timelineSummary({
+    items,
+    total_item_count: 122,
+    matching_item_count: 122,
+    total_duration_ms: 121,
+    has_more: true,
+  });
 
-      return scopedWire;
-    },
-  };
+  assert.equal(paged.matchingLabel, '122 matching');
+  assert.equal(paged.loadedLabel, '50 loaded from 122 captured across 121 ms');
+  assert.equal(paged.pageLabel, 'Showing 50 of 122 timeline events. More activity loads as you scroll.');
+  assert.equal(paged.loadingLabel, 'Loading up to 50 more timeline events…');
+  assert.equal(paged.completeLabel, 'All 122 timeline events are loaded.');
+  assert.equal(paged.hasMore, true);
+  assert.deepEqual(
+    paged.ticks.map(({ label }) => label),
+    ['0 µs', '30.25 ms', '60.5 ms', '90.75 ms', '121 ms'],
+  );
 
-  shell.selected = 'timeline';
-  state.$refs = { timelineList: scrollOwner };
-  state.$root = {
-    querySelector: (selector) => (selector === '[data-ndb-timeline-page-sentinel]' ? nextSentinel : null),
-  };
-  state.$nextTick = (callback) => callback();
-  state.observeTimelinePageEnd(firstSentinel, wire);
+  const fallback = timelineSummary({ items: [{ at_ms: 2 }, { at_ms: 'bad' }] });
+  assert.equal(fallback.total, 2);
+  assert.equal(fallback.matches, 2);
+  assert.equal(fallback.duration, 2);
+  assert.equal(fallback.completeLabel, null);
+  assert.equal(fallback.hasMore, false);
 
-  assert.equal(observers.length, 1);
-  assert.equal(observers[0].target, firstSentinel);
-  assert.equal(observers[0].scrollOwner, scrollOwner);
+  const empty = timelineSummary(undefined);
+  assert.equal(empty.total, 0);
+  assert.equal(empty.duration, 0.001);
+});
 
-  const firstPage = observers[0].callback();
-  assert.equal(state.timelineLoadingMore, true);
-  assert.equal(pageCalls, 1);
-  await observers[0].callback();
-  assert.equal(pageCalls, 1);
+test('timeline rows describe spans, milestones, and events', () => {
+  const span = timelineItemView({
+    id: 'queries-0',
+    inspector: 'queries',
+    inspector_label: 'Queries',
+    kind: 'span',
+    label: 'select * from trips',
+    at_ms: 12.5,
+    start_ms: 10,
+    duration_ms: 2.5,
+    source: { file: 'app/Trips/LoadTrip.php', line: 24 },
+    at_percent: 50,
+    start_percent: 40,
+    duration_percent: 10,
+  });
 
-  resolvePage();
-  assert.equal(await firstPage, true);
-  assert.equal(state.timelineLoadingMore, false);
-  assert.equal(state.timelinePaginationError, false);
-  assert.equal(cleanups, 1);
-  assert.equal(observers.length, 2);
-  assert.equal(observers[1].target, nextSentinel);
+  assert.deepEqual(span, {
+    id: 'queries-0',
+    inspector: 'queries',
+    inspectorLabel: 'Queries',
+    kind: 'span',
+    kindLabel: 'Duration',
+    label: 'select * from trips',
+    atMs: 12.5,
+    atLabel: '12.5 ms',
+    startMs: 10,
+    startLabel: '10 ms',
+    durationMs: 2.5,
+    durationLabel: '2.5 ms',
+    source: 'app/Trips/LoadTrip.php:24',
+    atPercent: 50,
+    startPercent: 40,
+    durationPercent: 10,
+  });
 
-  scopedWire.loadMoreTimeline = async () => {
-    pageCalls++;
-    throw new Error('expired');
-  };
-  assert.equal(await observers[1].callback(), false);
-  assert.equal(state.timelineLoadingMore, false);
-  assert.equal(state.timelinePaginationError, true);
-  assert.equal(observers.length, 2);
-  const failedPageCalls = pageCalls;
-  assert.equal(await observers[1].callback(), false);
-  assert.equal(pageCalls, failedPageCalls);
+  const milestone = timelineItemView({
+    id: 'request-start',
+    inspector: 'request',
+    kind: 'milestone',
+    label: 'Request started',
+    at_ms: 0,
+    at_percent: 0,
+  });
+  assert.equal(milestone.inspectorLabel, 'Request');
+  assert.equal(milestone.kindLabel, 'Request milestone');
+  assert.equal(milestone.startLabel, null);
+  assert.equal(milestone.durationLabel, null);
+  assert.equal(milestone.source, null);
+  assert.equal(milestone.startPercent, 0);
+  assert.equal(milestone.durationPercent, 0);
 
-  scopedWire.loadMoreTimeline = async () => {
-    pageCalls++;
-  };
-  assert.equal(await state.retryTimelinePage(wire), true);
-  assert.equal(state.timelinePaginationError, false);
-  assert.equal(observers.length, 3);
+  const event = timelineItemView({
+    id: 7,
+    inspector: 'http_client',
+    kind: 'event',
+    label: 'GET /',
+    at_ms: 1,
+    source: { file: 'app/Client.php' },
+  });
+  assert.equal(event.id, '7');
+  assert.equal(event.inspectorLabel, 'Http Client');
+  assert.equal(event.kindLabel, 'Event');
+  assert.equal(event.source, 'app/Client.php:1');
+});
 
-  state.resetTimelinePagination();
-  assert.equal(cleanups, 3);
-  assert.equal(state.timelineLoadingMore, false);
+test('only the newest timeline request may apply its result', () => {
+  const gate = createRequestGate();
+  const filter = gate.begin();
+  const page = gate.begin();
+
+  assert.equal(gate.current(filter), false);
+  assert.equal(gate.current(page), true);
+
+  gate.invalidate();
+  assert.equal(gate.current(page), false);
+  assert.equal(gate.current(gate.begin()), true);
 });

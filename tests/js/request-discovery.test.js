@@ -54,7 +54,7 @@ test('profile discovery always reaches the current toolbar after a morph', () =>
   const second = { discoveries: [], noticeProfile(id, foreground) { this.discoveries.push([id, foreground]); } };
   let state = first;
   browser.document = { getElementById: () => ({}) };
-  browser.Alpine = { $data: () => state };
+  browser.newDebugBarData = () => state;
   installProfileDiscoveryBridge(browser);
 
   browser.dispatchEvent(new browser.CustomEvent('newdebugbar-profile-discovered', {
@@ -69,35 +69,29 @@ test('profile discovery always reaches the current toolbar after a morph', () =>
   assert.deepEqual(second.discoveries, [['660e8400-e29b-41d4-a716-446655440000', true]]);
 });
 
-test('profile discovery safely falls back to Livewire while the toolbar initializes', () => {
+test('profile discovery waits quietly while the bar is missing or unavailable', () => {
   const browser = runtime();
   const discoveries = [];
-  browser.document = { getElementById: () => null };
-  browser.Livewire = {
-    getByName: () => [{
-      noticeProfile: (id) => discoveries.push(['notice', id]),
-      switchProfile: (id) => discoveries.push(['switch', id]),
-    }],
-  };
+  let root = null;
+  browser.document = { getElementById: () => root };
+  browser.newDebugBarData = () => ({ noticeProfile: (id, foreground) => discoveries.push([id, foreground]) });
   installProfileDiscoveryBridge(browser);
   installProfileDiscoveryBridge(browser);
 
   browser.dispatchEvent(new browser.CustomEvent('newdebugbar-profile-discovered', {
     detail: { profileId, foreground: false },
   }));
-  browser.dispatchEvent(new browser.CustomEvent('newdebugbar-profile-discovered', {
-    detail: { profileId: '660e8400-e29b-41d4-a716-446655440000', foreground: true },
-  }));
+  root = {};
   browser.dispatchEvent(new browser.CustomEvent('newdebugbar-profile-discovered', {
     detail: { profileId: 'not-a-profile-id' },
   }));
+  browser.dispatchEvent(new browser.CustomEvent('newdebugbar-profile-discovered', {
+    detail: { profileId: '660e8400-e29b-41d4-a716-446655440000', foreground: true },
+  }));
 
-  assert.deepEqual(discoveries, [
-    ['notice', profileId],
-    ['switch', '660e8400-e29b-41d4-a716-446655440000'],
-  ]);
+  assert.deepEqual(discoveries, [['660e8400-e29b-41d4-a716-446655440000', true]]);
 
-  browser.Livewire.getByName = () => { throw new Error('toolbar unavailable'); };
+  browser.newDebugBarData = () => { throw new Error('bar unavailable'); };
   assert.doesNotThrow(() => browser.dispatchEvent(new browser.CustomEvent('newdebugbar-profile-discovered', {
     detail: { profileId },
   })));

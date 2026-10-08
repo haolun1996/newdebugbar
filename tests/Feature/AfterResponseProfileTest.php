@@ -13,7 +13,7 @@ it('keeps the response profile open through terminate without inflating HTTP dur
     $provisional = app(ProfileStore::class)->get($profileId);
 
     expect($profileId)->not->toBeEmpty()
-        ->and($contentBeforeTerminate)->toContain('Original response', 'id="newdebugbar"')
+        ->and($contentBeforeTerminate)->toContain('Original response', 'id="newdebugbar-mount"')
         ->and($provisional)
         ->completion_state->toBe('terminating')
         ->inspectors->mail->summary->count->toBe(0);

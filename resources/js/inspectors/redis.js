@@ -1,102 +1,71 @@
-import { filterList } from './list.js';
-import { readInspectorPayload } from '../runtime.js';
+/** Pure view logic for the Redis inspector. */
 
-/** Owns redis inspector state and interactions. */
-export function createRedis(context) {
-  const { browser, shell } = context;
-  const summary = shell.summary;
+export const REDIS_FILTERS = ['all', 'failed'];
+
+const number = (value) => Number(value).toLocaleString('en-US');
+
+export function matchesRedisCommand(command, { filter = 'all', search = '' } = {}) {
+  const term = String(search).toLowerCase().trim();
+  const matchesFilter = filter === 'all' || (filter === 'failed' && Boolean(command.failed));
+
+  return matchesFilter && (term === '' || String(command.search ?? '').includes(term));
+}
+
+/** Every command with its visibility, the visible count, and the selection kept or moved to the first visible. */
+export function redisView(commands, { filter = 'all', search = '', selected = null } = {}) {
+  const rows = commands.map((item) => ({ item, visible: matchesRedisCommand(item, { filter, search }) }));
+  const visible = rows.filter((row) => row.visible).map((row) => row.item.execution);
+
   return {
-    refresh() {
-      const payload = readInspectorPayload(this.$root, '[data-ndb-redis-payload]');
-      if (payload !== null) this.initializeRedis(payload);
-    },
-
-    redisCommands: [],
-    redisFilter: 'all',
-    redisSearch: '',
-    redisSelected: null,
-    redisDetailOpen: false,
-    visibleRedisCount: summary.inspector_counts?.redis ?? 0,
-
-    get selectedRedisCommand() {
-      return this.redisCommands.find((command) => command.execution === this.redisSelected) ?? null;
-    },
-
-    initializeRedis(commands) {
-      this.redisCommands = Array.isArray(commands) ? commands : [];
-      if (this.initialized) {
-        this.$nextTick?.(() => this.applyRedisView());
-        return;
-      }
-      this.initialized = true;
-      this.redisFilter = 'all';
-      this.redisSearch = '';
-      this.redisSelected = this.redisCommands[0]?.execution ?? null;
-      this.redisDetailOpen = false;
-      this.$nextTick?.(() => this.applyRedisView());
-    },
-
-    setRedisFilter(filter) {
-      if (!['all', 'failed'].includes(filter)) return;
-
-      this.redisFilter = filter;
-      this.applyRedisView();
-    },
-
-    selectRedisCommand(execution) {
-      if (!this.redisCommands.some((command) => command.execution === execution)) return;
-
-      this.redisSelected = execution;
-      this.redisDetailOpen = true;
-      this.resetRedisDetail(true);
-    },
-
-    closeRedisDetail() {
-      const selected = this.redisSelected;
-
-      if (!this.redisDetailOpen) return;
-
-      this.redisDetailOpen = false;
-      this.$nextTick?.(() => {
-        const row = [...(this.$refs?.redisList?.children ?? [])].find(
-          (item) => Number(item.dataset.ndbRedisExecution) === selected,
-        );
-        row?.focus?.({ preventScroll: true });
-      });
-    },
-
-    resetRedisDetail(focus = false) {
-      this.$nextTick?.(() => {
-        this.$refs?.content?.scrollTo?.({ top: 0, behavior: 'instant' });
-        this.$refs?.redisDetail?.scrollTo?.({ top: 0, behavior: 'instant' });
-        if (focus) this.$refs?.redisDetail?.focus?.({ preventScroll: true });
-        browser.highlight?.();
-      });
-    },
-
-    applyRedisView() {
-      const list = this.$refs?.redisList;
-      const search = this.redisSearch.toLowerCase().trim();
-      const commands = new Map(this.redisCommands.map((command) => [command.execution, command]));
-
-      const { visible, firstVisible, selectedVisible } = filterList(list?.children ?? [], {
-        selected: this.redisSelected,
-        key: (item) => Number(item.dataset.ndbRedisExecution),
-        matches: (item) => {
-          const command = commands.get(Number(item.dataset.ndbRedisExecution));
-          const matchesFilter =
-            this.redisFilter === 'all' ||
-            (this.redisFilter === 'failed' && item.dataset.ndbRedisFailed === 'true');
-          return command !== undefined && matchesFilter && (search === '' || command.search.includes(search));
-        },
-      });
-
-      this.visibleRedisCount = visible;
-
-      if (!selectedVisible) {
-        this.redisSelected = firstVisible;
-        if (firstVisible === null) this.redisDetailOpen = false;
-      }
-    },
+    rows,
+    visibleCount: visible.length,
+    selected: visible.includes(selected) ? selected : (visible[0] ?? null),
   };
+}
+
+/** Command count, failures, and the summary line under it (redis.blade.php). */
+export function redisSummary(summary = {}, commands = [], formatDuration = String) {
+  const count = commands.length;
+  const failures =
+    Math.trunc(
+      Number(summary.failed_count ?? commands.filter((command) => command.failed === true).length),
+    ) || 0;
+  const parts = [`${formatDuration(Number(summary.duration_ms ?? 0))} total`];
+
+  if (failures > 0) parts.push(`${number(failures)} ${failures === 1 ? 'failure' : 'failures'}`);
+
+  return {
+    count,
+    countLabel: `${number(count)} ${count === 1 ? 'command' : 'commands'}`,
+    failures,
+    line: parts.join(', '),
+  };
+}
+
+/** Copy action and labels for a command's retained keys or protected identifiers. */
+export function redisKeyEvidence(command) {
+  const keys = Array.isArray(command.keys) ? command.keys : [];
+  const hashes = Array.isArray(command.key_hashes) ? command.key_hashes : [];
+  const dropped = Number(command.key_dropped ?? 0);
+
+  return {
+    keys,
+    hashes,
+    protectedOnly: keys.length === 0 && hashes.length > 0,
+    none: keys.length === 0 && hashes.length === 0,
+    copy: (keys.length ? keys : hashes).join('\n'),
+    copyLabel: keys.length ? 'Copy keys' : 'Copy identifiers',
+    dropped,
+    droppedLabel:
+      dropped === 1
+        ? 'more key was not retained because this command reached the capture limit.'
+        : 'more keys were not retained because this command reached the capture limit.',
+  };
+}
+
+/** Explains time spent after the response was sent. */
+export function redisAfterResponseText(command) {
+  return command.after_response_label
+    ? `This command ran ${command.after_response_label} after the response was sent, so its time is not part of the response time.`
+    : 'This command ran after the response was sent, so its time is not part of the response time.';
 }

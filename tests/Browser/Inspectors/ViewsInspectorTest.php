@@ -1,5 +1,6 @@
 <?php
 
+use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Tests\Support\DebugBarBrowser;
 
 it('opens retained collection values after refreshing and reopening the Views inspector', function (int $width, int $height, string $theme) {
@@ -234,4 +235,56 @@ it('uses a bounded mobile list drill-in with a working Views back action', funct
     DebugBarBrowser::waitForFocus($page, '[data-ndb-view-group][aria-pressed="true"]');
 
     $page->assertNoJavaScriptErrors();
+});
+
+it('shows render data only after its exact render responds', function () {
+    $page = visit('/profiled-context')->resize(1280, 720);
+    $page->script(<<<'JS'
+        (() => {
+            const fetch = window.fetch;
+            window.newdebugbarViewDataRequests = [];
+            window.fetch = (...args) => String(args[0]).includes('/views/')
+                ? new Promise((resolve) => window.newdebugbarViewDataRequests.push(() => resolve(fetch(...args))))
+                : fetch(...args);
+
+            return true;
+        })()
+        JS);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="views"]')
+        ->click('[data-ndb-view-group="view-1"]')
+        ->assertVisible('[data-ndb-view-data-panel]')
+        ->assertVisible('[data-ndb-view-data-loading]')
+        ->assertMissing('[data-ndb-view-data]')
+        ->assertDontSee('view-data-value')
+        ->assertScript('window.newdebugbarViewDataRequests.length', 1);
+
+    $page->script('window.newdebugbarViewDataRequests.forEach((release) => release())');
+
+    $page->waitForText('NL-1042')
+        ->assertSee('view-data-value')
+        ->assertVisible('[data-ndb-view-data]')
+        ->assertMissing('[data-ndb-view-data-loading]')
+        ->assertNoJavaScriptErrors();
+});
+
+it('reports views dropped by the collection limit without findings in the panel', function () {
+    $page = visit('/profiled-views')->resize(1280, 720);
+    $store = app(ProfileStore::class);
+    $profile = $store->get($page->script('newDebugBarData().summary.id'));
+    $profile['inspectors']['views']['summary'] = ['count' => 2, 'retained_count' => 0, 'dropped_count' => 2];
+    $profile['inspectors']['views']['payload'] = ['items' => []];
+    $store->put($profile);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="views"]');
+
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-collection-status="views"]');
+
+    $page->assertSeeIn('[data-ndb-collection-status="views"]', 'Showing 0 of 2 views.')
+        ->assertSeeIn('[data-ndb-inspector-panel="views"]', 'No views were captured for this request.')
+        ->assertMissing('[data-ndb-inspector-panel="views"] [data-ndb-findings]')
+        ->assertMissing('[data-ndb-view-workspace]')
+        ->assertNoJavaScriptErrors();
 });

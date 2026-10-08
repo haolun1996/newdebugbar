@@ -1,7 +1,5 @@
 <?php
 
-use Livewire\Livewire;
-use NewDebugBar\Livewire\DebugBar;
 use NewDebugBar\Storage\ProfileStore;
 
 it('stores and serves bounded local previews with downloadable attachments', function () {
@@ -80,11 +78,11 @@ it('stores and serves bounded local previews with downloadable attachments', fun
         ->assertHeader('Content-Disposition', 'attachment; filename="message-1.eml"');
     expect($emlResponse->getContent())->toContain('private.txt', base64_encode('private attachment'));
 
-    Livewire::test(DebugBar::class, ['profileId' => $profileId])
-        ->call('loadInspector', 'mail')
-        ->assertSee('Download .EML')
-        ->assertSee('Download')
-        ->assertSee('Open preview');
+    $this->getJson("/__newdebugbar/api/profiles/{$profileId}/inspectors/mail")
+        ->assertOk()
+        ->assertJsonPath('profile.inspectors.mail.payload.items.0.preview.text', 'private body')
+        ->assertJsonPath('profile.inspectors.mail.payload.items.0.preview.attachments.0.name', 'private.txt')
+        ->assertJsonPath('profile.inspectors.mail.payload.items.0.preview.html', '<script>window.top.location="https://example.test"</script><h1>Safe preview</h1>');
 
     $this->get(route('newdebugbar.mail-attachment', [
         'profile' => $profileId,

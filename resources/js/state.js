@@ -1,5 +1,4 @@
 import { defaultRuntime, composeState } from './runtime.js';
-import { createInspectorController } from './inspectors/index.js';
 import { createInspectorShell } from './shell/inspector.js';
 import { createNavigation } from './shell/navigation.js';
 import { createRequests } from './shell/requests.js';
@@ -8,7 +7,7 @@ import { createToolbar } from './shell/toolbar.js';
 import { createPreferences } from './shell/preferences.js';
 import { createPalette } from './shell/palette.js';
 
-/** Assembles the request shell; each mounted inspector creates and owns its Alpine state. */
+/** Assembles the request shell; each mounted inspector registers itself through mountInspector. */
 export function createNewDebugBar(
   summary = {},
   runtime = null,
@@ -28,15 +27,5 @@ export function createNewDebugBar(
     createToolbar(context),
     createPreferences(context),
     createPalette(context),
-    {
-      createInspector(inspector, profileId = this.summary.id) {
-        return createInspectorController(inspector, {
-          browser,
-          trace,
-          shell: context.shell ?? this,
-          profileId,
-        });
-      },
-    },
   );
 }

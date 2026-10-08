@@ -1,5 +1,6 @@
 <?php
 
+use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Tests\Support\DebugBarBrowser;
 
 it('keeps the desktop waterfall useful inside the shared timeline workspace', function () {
@@ -210,3 +211,196 @@ it('finds timeline evidence beyond the loaded page before scrolling', function (
         ->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length === 1')
         ->assertNoJavaScriptErrors();
 });
+
+/** Opens the timeline after replacing the captured inspectors of a profiled page. */
+function visitTimelineProfile(array $inspectors, float $duration): mixed
+{
+    $page = visit('/profiled-timeline-long')->resize(1280, 720);
+    $store = app(ProfileStore::class);
+    $profile = $store->get($page->script('newDebugBarData().summary.id'));
+    $store->put(array_merge($profile, ['metrics' => ['duration_ms' => $duration], 'inspectors' => $inspectors]));
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="timeline"]');
+    DebugBarBrowser::assertInspectorSelected($page, 'timeline');
+    DebugBarBrowser::waitForDetails($page);
+
+    return $page;
+}
+
+/** Records every timeline request the inspector sends. */
+const RECORD_TIMELINE_REQUESTS = <<<'JS'
+    (() => {
+        const fetch = window.fetch;
+        window.newdebugbarTimelineRequests = [];
+        window.fetch = (input, init) => {
+            const url = new URL(String(input), window.location.href);
+            if (url.pathname.endsWith('/inspectors/timeline')) window.newdebugbarTimelineRequests.push(url.searchParams);
+
+            return fetch(input, init);
+        };
+
+        return true;
+    })()
+    JS;
+
+function longTimelineRequest(): array
+{
+    return [
+        'method' => 'GET',
+        'status' => 200,
+        'path' => '/long-timeline',
+        'route' => null,
+        'action' => null,
+    ];
+}
+
+it('explains an incomplete timeline above its activity', function () {
+    $page = visitTimelineProfile([
+        'request' => ['label' => 'Request', 'summary' => ['method' => 'GET', 'status' => 200], 'payload' => longTimelineRequest()],
+        'views' => [
+            'label' => 'Views',
+            'summary' => ['count' => 2, 'retained_count' => 0, 'dropped_count' => 2],
+            'payload' => ['items' => []],
+        ],
+    ], 15.2);
+
+    $page->assertVisible('[data-ndb-timeline-incomplete]')
+        ->assertSeeIn('[data-ndb-timeline-incomplete]', 'Timeline incomplete: 2 source events were omitted.')
+        ->assertVisible('[data-ndb-timeline-workspace]')
+        ->assertNoJavaScriptErrors();
+});
+
+it('pages long timelines in deterministic batches and restarts after filtering', function () {
+    $page = visitTimelineProfile([
+        'request' => ['label' => 'Request', 'summary' => ['method' => 'GET', 'status' => 200], 'payload' => longTimelineRequest()],
+        'logs' => ['label' => 'Logs', 'summary' => ['count' => 120], 'payload' => ['items' => array_map(
+            fn (int $index): array => ['level' => 'info', 'message' => 'Timeline event '.$index, 'at_ms' => (float) $index],
+            range(1, 120),
+        )]],
+        'exceptions' => ['label' => 'Exceptions', 'summary' => ['count' => 0], 'payload' => ['items' => []]],
+    ], 121);
+
+    $page->assertScript(RECORD_TIMELINE_REQUESTS)
+        ->assertSeeIn('[data-ndb-timeline-summary]', '2 matching')
+        ->select('[data-ndb-timeline-filter]', 'all')
+        ->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 50)
+        ->assertSee('Showing 50 of 122 timeline')
+        ->assertSee('More activity loads as you scroll.')
+        ->assertPresent('[data-ndb-timeline-page-sentinel]')
+        ->assertMissing('[data-ndb-timeline-load-more]');
+
+    $page->script("document.querySelector('[data-ndb-timeline-page-sentinel]').scrollIntoView({ block: 'end' })");
+    $page->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 100);
+    $page->script("document.querySelector('[data-ndb-timeline-page-sentinel]').scrollIntoView({ block: 'end' })");
+
+    $page->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 122)
+        ->assertMissing('[data-ndb-timeline-page-sentinel]')
+        ->assertSee('All 122 timeline events are loaded.')
+        ->select('[data-ndb-timeline-filter]', 'logs')
+        ->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 50)
+        ->fill('[data-ndb-timeline-search-field]', 'event 119')
+        ->assertScript('[...document.querySelectorAll("[data-ndb-timeline-item]")].map((item) => item.dataset.ndbTimelineItem).join()', 'logs-118')
+        ->assertMissing('[data-ndb-timeline-page-sentinel]')
+        ->fill('[data-ndb-timeline-search-field]', 'no such activity')
+        ->assertSee('No timeline activity matches this search and filter.')
+        ->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 0)
+        ->assertPresent('[data-ndb-timeline-search-field]')
+        ->assertScript(<<<'JS'
+            (() => {
+                const requests = window.newdebugbarTimelineRequests.map((params) => ({
+                    filter: params.get('timeline_filter'),
+                    search: params.get('timeline_search') ?? '',
+                    limit: Number(params.get('timeline_limit')),
+                }));
+                const pages = requests.filter((request, index) => index > 0
+                    && request.filter === requests[index - 1].filter
+                    && request.search === requests[index - 1].search);
+
+                return requests[0].filter === 'all' && requests[0].limit === 50
+                    && pages.map((request) => request.limit).join() === '100,150'
+                    && requests.filter((request) => ! pages.includes(request)).every((request) => request.limit === 50)
+                    && requests.at(-1).filter === 'logs' && requests.at(-1).search === 'no such activity';
+            })()
+            JS);
+
+    $page->click('[data-ndb-select-inspector="request"]');
+    DebugBarBrowser::waitForDetails($page);
+    $page->click('[data-ndb-select-inspector="timeline"]');
+    DebugBarBrowser::waitForDetails($page);
+
+    $page->assertValue('[data-ndb-timeline-filter]', 'key')
+        ->assertValue('[data-ndb-timeline-search-field]', '')
+        ->assertSeeIn('[data-ndb-timeline-summary]', '2 matching')
+        ->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 2)
+        ->assertScript('window.newdebugbarTimelineRequests.at(-1).get("timeline_limit") === null')
+        ->assertNoJavaScriptErrors();
+});
+
+it('keeps the selected timeline page when a background refresh races it', function (bool $refreshFirst) {
+    $page = visit('/profiled-timeline-long')->resize(1280, 720);
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]')
+        ->click('[data-ndb-select-inspector="timeline"]');
+    DebugBarBrowser::assertInspectorSelected($page, 'timeline');
+    DebugBarBrowser::waitForDetails($page);
+
+    $page->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 50)
+        ->assertScript(<<<'JS'
+            (() => {
+                const fetch = window.fetch;
+                window.newdebugbarHeldTimeline = [];
+                window.newdebugbarHoldTimeline = true;
+                window.fetch = (input, init) => {
+                    const url = new URL(String(input), window.location.href);
+
+                    if (! window.newdebugbarHoldTimeline || ! url.pathname.endsWith('/inspectors/timeline')) {
+                        return fetch(input, init);
+                    }
+
+                    return new Promise((resolve) => window.newdebugbarHeldTimeline.push({
+                        page: url.searchParams.get('timeline_limit') === '100',
+                        release: () => resolve(fetch(input, init)),
+                    }));
+                };
+
+                return true;
+            })()
+            JS);
+
+    $page->script("document.querySelector('[data-ndb-timeline-page-sentinel]').scrollIntoView({ block: 'end' })");
+    $page->assertScript('window.newdebugbarHeldTimeline.length', 1)
+        ->assertScript("(newDebugBarData().requestInspector('timeline', true), true)")
+        ->assertScript('window.newdebugbarHeldTimeline.length', 2)
+        ->assertScript(sprintf(<<<'JS'
+            (() => {
+                const held = window.newdebugbarHeldTimeline;
+                const page = held.find((request) => request.page);
+                const refresh = held.find((request) => ! request.page);
+                window.newdebugbarHoldTimeline = false;
+                window.newdebugbarReleaseLast = %s ? page : refresh;
+                (%s ? refresh : page).release();
+
+                return page !== undefined && refresh !== undefined;
+            })()
+            JS, $refreshFirst ? 'true' : 'false', $refreshFirst ? 'true' : 'false'))
+        ->wait(0.3)
+        ->assertScript('(window.newdebugbarReleaseLast.release(), true)')
+        ->assertScript(<<<'JS'
+            (() => {
+                const shell = newDebugBarData();
+                const panels = [...document.querySelectorAll('[data-ndb-inspector-panel]')];
+
+                return shell.selected === 'timeline'
+                    && shell.loadedInspector === 'timeline'
+                    && panels.length === 1
+                    && panels[0].dataset.ndbInspectorPanel === 'timeline'
+                    && document.querySelectorAll('[data-ndb-timeline-item]').length === 100;
+            })()
+            JS)
+        ->wait(0.3)
+        ->assertScript('document.querySelectorAll("[data-ndb-timeline-item]").length', 100)
+        ->assertNoJavaScriptErrors();
+})->with([
+    'refresh first' => true,
+    'refresh last' => false,
+]);

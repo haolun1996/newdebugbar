@@ -1,6 +1,6 @@
 ---
 name: craft-newdebugbar-ui
-description: Design, build, refactor, or review the New Debug Bar interface in this repository. Use for inspectors, debug-bar chrome, shared Blade components, responsive behavior, visual hierarchy, and diagnostic copy.
+description: Design, build, refactor, or review the New Debug Bar interface in this repository. Use for inspectors, debug-bar chrome, shared React components, responsive behavior, visual hierarchy, and diagnostic copy.
 ---
 
 # Craft New Debug Bar UI

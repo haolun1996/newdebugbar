@@ -30,7 +30,7 @@ it('collects background requests in the split button without changing the host p
         ->assertNoJavaScriptErrors()
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 window.__newDebugBarActiveProfile = state.summary.id;
                 window.__newDebugBarFetchSentinel = true;
                 window.__newDebugBarDiscoveries = [];
@@ -61,7 +61,7 @@ it('collects background requests in the split button without changing the host p
         ->assertNoJavaScriptErrors()
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 const discoveries = window.__newDebugBarDiscoveries;
 
                 return window.__newDebugBarFetchSentinel === true
@@ -79,7 +79,7 @@ it('collects background requests in the split button without changing the host p
         ->assertScript(<<<'JS'
             (() => {
                 const toolbar = document.querySelector('[data-ndb-toolbar-shell]');
-                Alpine.$data(toolbar).pinToolbar('bottom-right');
+                newDebugBarData(toolbar).pinToolbar('bottom-right');
 
                 return true;
             })()
@@ -112,14 +112,14 @@ it('collects background requests in the split button without changing the host p
         ->assertScript(<<<'JS'
             (() => {
                 const toolbar = document.querySelector('[data-ndb-toolbar-shell]');
-                Alpine.$data(toolbar).pinToolbar('bottom');
+                newDebugBarData(toolbar).pinToolbar('bottom');
 
                 return true;
             })()
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 state.setTheme('dark');
 
                 return document.getElementById('newdebugbar').dataset.ndbTheme === 'dark';
@@ -149,7 +149,7 @@ it('collects background requests in the split button without changing the host p
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 const options = Array.from(document.querySelectorAll('#newdebugbar-request-list-toolbar [data-ndb-request-option]'));
                 const groups = Array.from(document.querySelectorAll('#newdebugbar-request-list-toolbar [data-ndb-request-group]'));
 
@@ -195,7 +195,7 @@ it('collects background requests in the split button without changing the host p
         ->assertNoJavaScriptErrors()
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 state.setTheme('light');
 
                 return document.getElementById('newdebugbar').dataset.ndbTheme === 'light';
@@ -220,7 +220,7 @@ it('collects background requests in the split button without changing the host p
         ->assertNoJavaScriptErrors()
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 const option = Array.from(document.querySelectorAll('#newdebugbar-request-list-toolbar [data-ndb-request-option]'))
                     .find((candidate) => candidate.dataset.ndbProfileId !== state.summary.id && candidate.textContent.includes('/api/plain-json'));
 
@@ -231,7 +231,7 @@ it('collects background requests in the split button without changing the host p
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
 
                 return state.summary.path === '/api/plain-json'
                     && state.inspectorOpen === true
@@ -259,7 +259,7 @@ it('collects background requests in the split button without changing the host p
                     && selectedLater !== null
                     && getComputedStyle(current.querySelector('[data-ndb-request-unread]')).opacity === '0'
                     && getComputedStyle(selectedLater.querySelector('[data-ndb-request-unread]')).opacity === '0'
-                    && Alpine.$data(document.getElementById('newdebugbar')).selected === 'request';
+                    && newDebugBarData(document.getElementById('newdebugbar')).selected === 'request';
             })()
             JS)
         ->assertNoJavaScriptErrors();
@@ -267,7 +267,7 @@ it('collects background requests in the split button without changing the host p
     foreach ([1, 0] as $remaining) {
         $page->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.getElementById('newdebugbar'));
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
                 window.newdebugbarViewedRequestIds ??= [state.summary.id];
                 const option = [...document.querySelectorAll('#newdebugbar-request-list-header [data-ndb-request-group="later"] [data-ndb-request-option]')]
                     .find((option) => ! window.newdebugbarViewedRequestIds.includes(option.dataset.ndbProfileId));
@@ -276,7 +276,7 @@ it('collects background requests in the split button without changing the host p
                 return true;
             })()
             JS)
-            ->assertScript('Alpine.$data(document.getElementById("newdebugbar")).unreadRequestCount', $remaining)
+            ->assertScript('newDebugBarData(document.getElementById("newdebugbar")).unreadRequestCount', $remaining)
             ->assertScript('document.querySelector(\'[data-ndb-request-picker-trigger="header"]\').disabled === false')
             ->click('[data-ndb-request-picker-trigger="header"]')
             ->assertCount('#newdebugbar-request-list-header [data-ndb-request-group="later"] [data-ndb-request-option]', 3)
@@ -318,7 +318,7 @@ it('lists API requests from other clients and opens their queries', function () 
             })()
             JS)
         ->click("#newdebugbar-request-list-toolbar [data-ndb-request-option][data-ndb-profile-id=\"{$apiId}\"]")
-        ->assertScript("Alpine.\$data(document.getElementById('newdebugbar')).summary.id", $apiId);
+        ->assertScript("newDebugBarData(document.getElementById('newdebugbar')).summary.id", $apiId);
 
     DebugBarBrowser::waitForDetails($page);
 
@@ -339,5 +339,81 @@ it('lists API requests from other clients and opens their queries', function () 
                     && getComputedStyle(later).display === 'none';
             })()
             JS)
+        ->assertNoJavaScriptErrors();
+});
+
+it('updates the request switcher from profile events and switches profiles with fresh inspector state', function () {
+    $apiId = $this->getJson('/api/orders')
+        ->assertOk()
+        ->headers->get('X-NewDebugBar-Profile');
+
+    $page = visit('/profiled')
+        ->resize(1440, 900)
+        ->assertAttribute('[data-ndb-request-picker-trigger="toolbar"]', 'aria-haspopup', 'listbox')
+        ->click('[data-ndb-toolbar="queries"]');
+
+    DebugBarBrowser::waitForDetails($page);
+
+    $page
+        ->assertAttribute('[data-ndb-request-picker-trigger="header"]', 'aria-haspopup', 'listbox')
+        ->assertAttribute('[data-ndb-request-picker-trigger="header-mobile"]', 'aria-haspopup', 'listbox')
+        ->assertScript(<<<'JS'
+            (() => {
+                const root = document.getElementById('newdebugbar');
+                const state = newDebugBarData(root);
+                const profile = (id, path) => ({ ...state.summary, id, path, title: `GET ${path}` });
+
+                window.__ndbQueriesPanel = root.querySelector('[data-ndb-loaded-inspector="queries"]');
+                window.__ndbSwitches = 0;
+                window.addEventListener('newdebugbar-profile-switched', () => window.__ndbSwitches++);
+                window.dispatchEvent(new CustomEvent('newdebugbar-profile-noticed', {
+                    detail: { summary: profile('0b5d6f2e-1c3a-4d5e-8f70-123456789abc', '/noticed') },
+                }));
+                window.dispatchEvent(new CustomEvent('newdebugbar-recent-profiles-loaded', {
+                    detail: { profiles: [profile('1c6e7a3f-2d4b-4e6f-9a81-23456789abcd', '/stored')] },
+                }));
+                window.dispatchEvent(new CustomEvent('newdebugbar-profile-refreshed', {
+                    detail: {
+                        summary: { ...state.summary, completion_state: 'complete' },
+                        relatedProfiles: [profile('2d7f8b4a-3e5c-4f7a-8b92-3456789abcde', '/related')],
+                    },
+                }));
+
+                return true;
+            })()
+            JS)
+        ->assertSeeIn('[data-ndb-request-badge="header"]', '2')
+        ->assertScript(<<<'JS'
+            (() => {
+                const list = document.getElementById('newdebugbar-request-list-header');
+                const text = (group) => [...list.querySelectorAll(`[data-ndb-request-group="${group}"] [data-ndb-request-option]`)]
+                    .map((option) => option.textContent);
+
+                return text('later').some((option) => option.includes('/noticed'))
+                    && text('later').some((option) => option.includes('/related'))
+                    && text('other').some((option) => option.includes('/stored'))
+                    && document.querySelector('[data-ndb-loaded-inspector="queries"]') === window.__ndbQueriesPanel
+                    && window.__ndbQueriesPanel.isConnected;
+            })()
+            JS)
+        ->click('[data-ndb-request-picker-trigger="header"]')
+        ->click("#newdebugbar-request-list-header [data-ndb-request-option][data-ndb-profile-id=\"{$apiId}\"]")
+        ->assertScript("newDebugBarData(document.getElementById('newdebugbar')).summary.id", $apiId);
+
+    DebugBarBrowser::waitForDetails($page);
+
+    $page
+        ->assertScript(<<<'JS'
+            (() => {
+                const state = newDebugBarData(document.getElementById('newdebugbar'));
+
+                return window.__ndbSwitches === 1
+                    && state.selected === 'request'
+                    && state.inspectorData.inspector === 'request'
+                    && document.querySelector('[data-ndb-loaded-inspector="queries"]') === null
+                    && window.__ndbQueriesPanel.isConnected === false;
+            })()
+            JS)
+        ->assertVisible('[data-ndb-inspector-panel="request"]')
         ->assertNoJavaScriptErrors();
 });

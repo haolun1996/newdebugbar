@@ -101,7 +101,7 @@ it('keeps a dragged favorite in place when the profile refreshes', function (str
         const root = document.getElementById('newdebugbar');
         window.newdebugbarProfileRefreshedDuringDrag = false;
         root.querySelector('[data-ndb-sort-group="favorites"]').addEventListener('change', () => {
-            const state = Alpine.$data(root);
+            const state = newDebugBarData(root);
             window.newdebugbarProfileRefreshedDuringDrag = true;
             window.dispatchEvent(new CustomEvent('newdebugbar-profile-refreshed', {
                 detail: {

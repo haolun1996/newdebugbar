@@ -163,6 +163,34 @@ it('presents logs as a persistent two column evidence inspector', function () {
             document.querySelector('[data-ndb-log-context-full-value]').textContent
                 === 'Retained diagnostic context. '.repeat(12) + '\nFinal retained line.'
             JS)
+        ->click('[data-ndb-log-entry][data-ndb-log-channel="newdebugbar-audit"]')
+        ->assertMissing('[data-ndb-log-detail] [data-ndb-log-context-value]')
+        ->assertScript(<<<'JS'
+            (() => {
+                const detail = document.querySelector('[data-ndb-log-detail]');
+                const payload = detail.querySelector('[data-ndb-log-context-payload]');
+                const compact = [...detail.querySelectorAll('[data-ndb-log-context] dt')]
+                    .map((term) => term.textContent.trim());
+
+                return payload !== null
+                    && payload.closest('dd') === null
+                    && payload.querySelector('h4').textContent.trim() === 'actor'
+                    && JSON.parse(payload.querySelector('code').textContent).type === 'planner'
+                    && compact.includes('trip_id')
+                    && ! detail.querySelector('[data-ndb-log-capture-details]').open;
+            })()
+            JS)
+        ->click('[data-ndb-log-detail] [data-ndb-log-capture-details] > summary')
+        ->assertSeeIn('[data-ndb-log-detail] [data-ndb-log-capture-details]', 'Captured at')
+        ->assertScript(<<<'JS'
+            (() => {
+                const values = [...document.querySelectorAll('[data-ndb-log-capture-details] [data-ndb-inspector-fact] dd')];
+
+                return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} [+-]\d{2}:\d{2}$/.test(values[0].textContent.trim())
+                    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(values[0].title)
+                    && /^#\d+$/.test(values[1].textContent.trim());
+            })()
+            JS)
         ->click('[data-ndb-log-entry][data-ndb-log-level="error"]')
         ->select('[data-ndb-log-level-select]', 'attention')
         ->assertAttribute('[data-ndb-log-entry][data-ndb-log-level="error"]', 'aria-pressed', 'true')
@@ -272,5 +300,19 @@ it('adapts the log list and details into a mobile drill in flow', function () {
         ->assertScript('document.querySelector("[data-ndb-log-level-select]").value === "all"')
         ->assertScript('document.querySelector("[data-ndb-log-channel-select]").value === "all"')
         ->assertScript('document.querySelectorAll("[data-ndb-log-entry][aria-pressed=true]").length', 0)
+        ->assertNoJavaScriptErrors();
+});
+
+it('shows a truthful empty state when no log records were captured', function () {
+    $page = visit('/profiled-models-empty')
+        ->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]');
+
+    DebugBarBrowser::selectInspectorViaPalette($page, 'logs');
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-log-empty]');
+
+    $page
+        ->assertSeeIn('[data-ndb-log-empty]', 'No log records were captured for this request.')
+        ->assertMissing('[data-ndb-log-controls]')
+        ->assertMissing('[data-ndb-log-entry]')
         ->assertNoJavaScriptErrors();
 });

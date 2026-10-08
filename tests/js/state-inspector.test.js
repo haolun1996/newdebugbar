@@ -153,13 +153,20 @@ test('mobile toolbar menus manage focus and hand off to overlays', () => {
       shrinkFocused++;
     },
   };
+  let headingFocused = 0;
+  const heading = { focus: () => headingFocused++ };
   const browser = runtime();
   browser.activeElement = () => active;
   const state = createNewDebugBar(summary, browser);
   state.$wire = { loadInspector: async () => {} };
   state.$refs = { paletteSearch };
   state.$root = {
-    querySelector: (selector) => (selector.includes('data-ndb-mobile-toolbar-menu') ? menuItem : shrink),
+    querySelector: (selector) =>
+      selector.includes('data-ndb-mobile-toolbar-menu')
+        ? menuItem
+        : selector === '[data-ndb-inspector-heading]'
+          ? heading
+          : shrink,
     querySelectorAll: () => [],
   };
   state.$nextTick = (callback) => callback();
@@ -178,6 +185,7 @@ test('mobile toolbar menus manage focus and hand off to overlays', () => {
   assert.equal(state.mobileToolbarMenu, null);
   assert.equal(state.selected, 'queries');
   assert.equal(state.inspectorOpen, true);
+  assert.equal(headingFocused, 1);
 
   state.inspectorOpen = false;
   state.barVisible = false;

@@ -3,6 +3,81 @@
 use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Tests\Support\DebugBarBrowser;
 
+it('loads the request inspector only after the inspector opens', function () {
+    $page = visit('/profiled')->resize(1440, 1000);
+
+    $page->assertPresent('#newdebugbar')
+        ->assertMissing('[data-ndb-inspector-panel="request"]')
+        ->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]');
+
+    DebugBarBrowser::waitForDetails($page);
+
+    $page->assertPresent('[data-ndb-inspector-panel="request"]')
+        ->assertMissing('[data-ndb-inspector-panel="queries"]')
+        ->assertVisible('[data-ndb-request-trace]')
+        ->assertNoJavaScriptErrors();
+});
+
+it('presents captured request and response evidence in their lifecycle stages', function (int $size, int $status, string $statusLabel) {
+    $middleware = ['App\\Http\\Middleware\\Authenticate', 'Illuminate\\Routing\\Middleware\\SubstituteBindings'];
+    $page = visit('/profiled')->resize(1440, 1000);
+    $store = app(ProfileStore::class);
+    $profile = $store->get($page->script('newDebugBarData().summary.id'));
+    $profile['metrics']['duration_ms'] = 12.5;
+    $profile['inspectors']['request']['payload'] = [
+        'method' => 'POST',
+        'status' => $status,
+        'url' => 'https://example.test/trips/kyoto?season=autumn',
+        'path' => '/trips/kyoto',
+        'route' => 'trips.show',
+        'action' => 'App\\Http\\Controllers\\TripWorkspaceController@show',
+        'middleware' => $middleware,
+        'headers' => ['content-type' => ['application/x-www-form-urlencoded']],
+        'content_type' => 'application/json; charset=utf-8',
+        'request_size_bytes' => $size,
+        'response_size_bytes' => 4096,
+        'query' => ['season' => 'autumn'],
+    ];
+    $store->put($profile);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]');
+    DebugBarBrowser::waitForDetails($page);
+
+    $page->assertCount('[data-ndb-request-step]', 3)
+        ->assertSeeIn('[data-ndb-request-path]', '/trips/kyoto')
+        ->assertScript(<<<JS
+            (() => {
+                const text = (selector) => document.querySelector(selector)?.textContent.replace(/\\s+/g, ' ').trim();
+                const received = document.querySelector('[data-ndb-request-step="received"]');
+                const responded = document.querySelector('[data-ndb-request-step="responded"]');
+                const headers = document.querySelector('[data-ndb-request-detail-panel="headers"]');
+
+                return text('[data-ndb-request-path]') === '/trips/kyoto'
+                    && text('[data-ndb-request-step="responded"] [data-ndb-request-status]') === '{$statusLabel}'
+                    && received.querySelectorAll('[data-ndb-request-size]').length === ({$size} > 0 ? 1 : 0)
+                    && document.querySelectorAll('[data-ndb-request-size]').length === ({$size} > 0 ? 1 : 0)
+                    && responded.textContent.includes('application/json; charset=utf-8')
+                    && ! received.textContent.includes('application/json; charset=utf-8')
+                    && headers.textContent.includes('application/x-www-form-urlencoded')
+                    && document.querySelector('[data-ndb-request-details]').open === false
+                    && document.querySelector('[data-ndb-request-middleware-trigger]').getAttribute('aria-expanded') === 'false'
+                    && document.querySelector('[data-ndb-request-middleware-popover]') === null
+                    && document.querySelectorAll('[data-ndb-request-copy]').length === 1;
+            })()
+            JS)
+        ->click('[data-ndb-request-middleware-trigger]')
+        ->assertVisible('[data-ndb-request-middleware-popover]')
+        ->assertCount('[data-ndb-request-middleware-popover] li', 2)
+        ->assertSeeIn('[data-ndb-request-middleware-popover]', 'App\\Http\\Middleware\\Authenticate')
+        ->assertSeeIn('[data-ndb-request-middleware-popover]', 'Illuminate\\Routing\\Middleware\\SubstituteBindings')
+        ->assertNoJavaScriptErrors();
+})->with([
+    'empty successful request' => [0, 200, '200 OK'],
+    'populated validation response' => [2048, 422, '422 Unprocessable Content'],
+    'populated redirect response' => [321, 302, '302 Found'],
+    'custom response status' => [0, 599, '599'],
+]);
+
 it('keeps expanded request evidence reachable through one scroll owner', function (int $width, int $height, string $theme) {
     $query = [];
 
@@ -100,7 +175,7 @@ it('keeps request evidence aligned and middleware accessible across viewports', 
     $page = visit('/profiled');
     $page->script("localStorage.setItem('newdebugbar.preferences.v1', JSON.stringify({theme: '$theme'}))");
     $page->refresh()->resize($width, $height);
-    $id = $page->script("document.getElementById('newdebugbar')._x_dataStack[0].summary.id");
+    $id = $page->script('newDebugBarData().summary.id');
     $store = app(ProfileStore::class);
     $profile = $store->get($id);
     $profile['inspectors']['request']['payload']['path'] = '/trips/'.str_repeat('very-long-journey-reference-', 8);

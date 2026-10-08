@@ -28,11 +28,13 @@ it('keeps related request actions in the activity header and source details comp
 
     $page->script(<<<'JS'
         (() => {
-            const state = Alpine.$data(document.querySelector('[data-ndb-loaded-inspector="livewire"]'));
+            const state = newDebugBarData(document.querySelector('[data-ndb-livewire]'));
+
+            const shell = newDebugBarData(document.getElementById('newdebugbar'));
 
             window.newdebugbarActivityEvidenceCalls = { copies: [], requests: [] };
-            state.inspector.copyText = (value) => window.newdebugbarActivityEvidenceCalls.copies.push(value);
-            state.inspector.openRelatedProfile = (profileId, inspector) =>
+            shell.copyText = (value) => window.newdebugbarActivityEvidenceCalls.copies.push(value);
+            shell.openRelatedProfile = (profileId, inspector) =>
                 window.newdebugbarActivityEvidenceCalls.requests.push([profileId, inspector]);
             state.livewireServerActivity = [];
         })()
@@ -43,7 +45,7 @@ it('keeps related request actions in the activity header and source details comp
 
         $page->script(<<<JS
             (() => {
-                const state = Alpine.\$data(document.querySelector('[data-ndb-loaded-inspector="livewire"]'));
+                const state = newDebugBarData(document.querySelector('[data-ndb-livewire]'));
                 const selected = state.livewireSelectedActivityId;
                 state.livewireTrace = {
                     ...state.livewireTrace,

@@ -60,8 +60,8 @@ const sameValue = (left, right) => JSON.stringify(cloneValue(left)) === JSON.str
 
 const componentName = (component) => component?.name ?? component?.snapshot?.memo?.name ?? 'livewire-component';
 
-const isHostComponent = (component) =>
-  component && componentName(component) !== 'newdebugbar.toolbar' && !component?.el?.closest?.('#newdebugbar');
+// Ignore anything rendered inside the bar itself; every other Livewire component belongs to the host.
+const isHostComponent = (component) => Boolean(component) && !component.el?.closest?.('#newdebugbar');
 
 const errorMessage = (error, fallback = 'The Livewire update failed.') => {
   const validation = error?.errors;

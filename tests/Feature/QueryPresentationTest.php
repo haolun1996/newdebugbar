@@ -1,6 +1,5 @@
 <?php
 
-use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Str;
 use NewDebugBar\Analysis\ProfileAnalyzer;
 use NewDebugBar\Analysis\QueryAnalyzer;
@@ -30,7 +29,7 @@ it('reuses the query analysis that prepared the profile when building findings',
         ->and(array_column(app(ProfileAnalyzer::class)->analyze($profile), 'rule_id'))->not->toContain('query.slow');
 });
 
-it('preserves grouped execution identities and transient EXPLAIN results in prepared records', function () {
+it('preserves grouped execution identities in prepared records', function () {
     $analysis = (new QueryAnalyzer)->analyze([
         ['sql' => 'select ?', 'bindings' => [1], 'runnable_available' => true, 'runnable_sql' => 'select 1'],
         ['sql' => 'update trips set active = 1'],
@@ -38,24 +37,11 @@ it('preserves grouped execution identities and transient EXPLAIN results in prep
     ]);
     $presenter = new QueryRecordPresenter;
     $records = $presenter->present($analysis);
-    $inspector = ['summary' => $analysis['summary'], 'payload' => ['records' => $records]];
-    $html = Blade::render(
-        '<x-newdebugbar::query-inspector :inspector="$inspector" :query-explains="$explains" :query-explain-errors="$errors" />',
-        [
-            'inspector' => $inspector,
-            'explains' => [1 => ['driver' => 'sqlite', 'rows' => [['detail' => 'SCAN CONSTANT ROW']]]],
-            'errors' => [3 => 'The database connection is unavailable.'],
-        ],
-    );
-    preg_match('/<script type="application\/json" data-ndb-query-payload>\s*(?<payload>[^<]+)\s*<\/script>/', $html, $matches);
-    $rendered = json_decode(base64_decode(trim($matches['payload']), true), true, flags: JSON_THROW_ON_ERROR);
 
-    expect(array_column($rendered, 'execution'))->toBe([1, 2])
-        ->and(array_column($rendered[0]['executions'], 'execution'))->toBe([1, 3])
-        ->and($rendered[0]['executions'][0]['explain']['driver'])->toBe('sqlite')
-        ->and($rendered[0]['executions'][1]['explain_error'])->toBe('The database connection is unavailable.')
+    expect(array_column($records, 'execution'))->toBe([1, 2])
+        ->and(array_column($records[0]['executions'], 'execution'))->toBe([1, 3])
         ->and($records[0]['executions'][0]['explain'])->toBeNull()
-        ->and($rendered[1]['executions'][0]['explain_available'])->toBeFalse()
+        ->and($records[1]['executions'][0]['explain_available'])->toBeFalse()
         ->and($presenter->filters($records))->toBe([
             'all' => ['All', 3],
             'attention' => ['Needs attention', 2],

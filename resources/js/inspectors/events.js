@@ -1,133 +1,68 @@
-import { readInspectorPayload } from '../runtime.js';
-import { formatDuration } from '../duration.js';
+/** Pure helpers for the events inspector. */
 
-/** Owns events inspector state and interactions. */
-export function createEvents(context) {
-  const { browser, shell } = context;
-  const summary = shell.summary;
+const SOURCES = ['all', 'application', 'framework'];
+
+const number = (value) => Number(value).toLocaleString('en-US');
+
+/** Application events first when the request dispatched any. */
+export function defaultEventSource(groups = []) {
+  return groups.some((event) => event.source === 'application') ? 'application' : 'all';
+}
+
+/** The initially selected event: the first application event, else the first event. */
+export function defaultEventSelection(groups = []) {
+  return (groups.find((event) => event.source === 'application') ?? groups[0])?.id ?? null;
+}
+
+/** Events that match the source filter and search, plus the dispatches behind them. */
+export function filterEvents(groups = [], { source = 'all', search = '' } = {}) {
+  const origin = SOURCES.includes(source) ? source : 'all';
+  const needle = String(search).toLowerCase().trim();
+  const visible = groups.filter(
+    (event) =>
+      (origin === 'all' || event.source === origin) &&
+      (needle === '' || String(event.search ?? '').includes(needle)),
+  );
+
   return {
-    refresh() {
-      const payload = readInspectorPayload(this.$root, '[data-ndb-event-payload]');
-      if (payload !== null) this.initializeEvents(payload);
-    },
-
-    eventGroups: [],
-    eventSource: 'all',
-    eventSearch: '',
-    eventSelected: null,
-    eventDetailOpen: false,
-    eventDetailTab: 'overview',
-    eventDetailReturnFocus: null,
-    visibleEventCount: summary.inspector_counts?.events ?? 0,
-    visibleEventGroupCount: 0,
-
-    get selectedEvent() {
-      return this.eventGroups.find((event) => event.id === this.eventSelected) ?? null;
-    },
-
-    get visibleEventSummary() {
-      if (this.visibleEventGroupCount === 0) return 'No events';
-
-      const events = `${this.visibleEventGroupCount} ${this.visibleEventGroupCount === 1 ? 'event' : 'events'}`;
-
-      if (this.visibleEventCount === this.visibleEventGroupCount) return events;
-
-      const dispatches = `${this.visibleEventCount} dispatches`;
-
-      return `${events}, ${dispatches}`;
-    },
-
-    initializeEvents(groups) {
-      this.eventGroups = Array.isArray(groups) ? groups : [];
-      if (this.initialized) {
-        this.$nextTick?.(() => this.applyEventFilters());
-        return;
-      }
-      this.initialized = true;
-      const firstApplicationEvent = this.eventGroups.find((event) => event.source === 'application');
-      this.eventSource = firstApplicationEvent ? 'application' : 'all';
-      this.eventSearch = '';
-      this.eventDetailOpen = false;
-      this.eventDetailTab = 'overview';
-      this.eventDetailReturnFocus = null;
-      this.eventSelected = firstApplicationEvent?.id ?? this.eventGroups[0]?.id ?? null;
-      this.$nextTick?.(() => this.applyEventFilters());
-    },
-
-    setEventSource(source) {
-      if (!['all', 'application', 'framework'].includes(source)) return;
-
-      this.eventSource = source;
-      this.eventDetailOpen = false;
-      this.eventDetailTab = 'overview';
-      this.eventDetailReturnFocus = null;
-      this.eventSelected = null;
-      this.applyEventFilters();
-    },
-
-    selectEvent(id, returnFocus = null) {
-      if (!this.eventGroups.some((event) => event.id === id)) return;
-
-      this.eventSelected = id;
-      this.eventDetailOpen = true;
-      this.eventDetailTab = 'overview';
-      this.eventDetailReturnFocus = returnFocus;
-      this.$nextTick?.(() => {
-        if (browser.viewportWidth?.() < 1024) this.$refs?.eventDetail?.focus?.();
-      });
-    },
-
-    closeEventDetail() {
-      const returnFocus = this.eventDetailReturnFocus;
-      this.eventDetailOpen = false;
-      this.eventDetailReturnFocus = null;
-      this.$nextTick?.(() => returnFocus?.isConnected && returnFocus.focus?.());
-    },
-
-    setEventDetailTab(tab) {
-      if (!['overview', 'payload', 'source'].includes(tab)) return;
-
-      this.eventDetailTab = tab;
-      this.$nextTick?.(() => this.$refs?.eventDetail?.scrollTo?.({ top: 0, behavior: 'instant' }));
-    },
-
-    applyEventFilters() {
-      const list = this.$refs?.eventList ?? this.$root?.querySelector?.('[x-ref="eventList"]');
-      const search = this.eventSearch.toLowerCase().trim();
-      let visibleEvents = 0;
-      let visibleGroups = 0;
-      let firstVisible = null;
-      let selectedVisible = false;
-
-      [...(list?.children ?? [])].forEach((item) => {
-        const matches =
-          (this.eventSource === 'all' || item.dataset.ndbEventSourceValue === this.eventSource) &&
-          (search === '' || item.dataset.ndbEventSearchValue?.includes(search));
-        item.hidden = !matches;
-
-        if (matches) {
-          item.style.removeProperty('display');
-          const id = Number(item.dataset.ndbEventId);
-          firstVisible ??= id;
-          selectedVisible ||= id === this.eventSelected;
-          visibleEvents += Number(item.dataset.ndbEventOccurrenceCount ?? 0);
-          visibleGroups++;
-        } else {
-          item.style.setProperty('display', 'none', 'important');
-        }
-      });
-
-      this.visibleEventCount = visibleEvents;
-      this.visibleEventGroupCount = visibleGroups;
-
-      if (!selectedVisible) {
-        if (this.eventSelected !== firstVisible) this.eventDetailTab = 'overview';
-        this.eventSelected = firstVisible;
-      }
-    },
-
-    formatEventTime(value) {
-      return formatDuration(value);
-    },
+    visible,
+    dispatches: visible.reduce((count, event) => count + (Number(event.occurrence_count ?? 0) || 0), 0),
   };
 }
+
+export function eventSummaryText(groupCount, dispatchCount) {
+  if (groupCount === 0) return 'No events';
+
+  const events = `${groupCount} ${groupCount === 1 ? 'event' : 'events'}`;
+
+  return dispatchCount === groupCount ? events : `${events}, ${dispatchCount} dispatches`;
+}
+
+export function eventListenerActivity(event) {
+  const completed = Number(event.completed_listener_count ?? 0);
+  const queued = Number(event.queued_listener_count ?? 0);
+
+  if (Number(event.listener_count ?? 0) === 0) return 'No listeners';
+  if (completed > 0 && queued > 0) return `${number(completed)} completed, ${number(queued)} queued`;
+  if (queued > 0) return `${number(queued)} queued`;
+
+  return `${number(completed)} completed`;
+}
+
+export function eventOrigin(event) {
+  if (event.source !== 'application') return 'Framework';
+
+  return event.broadcast ? 'Application broadcast' : 'Application';
+}
+
+export function eventSequence(event) {
+  return event.first_sequence === event.last_sequence
+    ? `#${event.first_sequence}`
+    : `#${event.first_sequence}–${event.last_sequence}`;
+}
+
+/** Count phrases such as `1 extra registration needs review.` */
+export const countPhrase = (count, singular, pluralPhrase) =>
+  `${count}${count === 1 ? singular : pluralPhrase}`;
+
+export const sourceLabel = (source) => (source ? `${source.file}:${source.line}` : '');

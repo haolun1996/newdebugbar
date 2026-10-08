@@ -35,6 +35,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
+use Livewire\Mechanisms\FrontendAssets\FrontendAssets;
 use NewDebugBar\Http\Middleware\ProfileRequest;
 use NewDebugBar\ProfileManager;
 use NewDebugBar\Storage\BackgroundActivityStore;
@@ -78,7 +79,7 @@ trait DefinesTestApplication
             new $modelClass;
         }
 
-        $profiledPage = function (string $title, string $nextPath, string $nextLabel) {
+        $profiledPage = function (string $title, string $nextPath, string $nextLabel, bool $livewire = false) {
             foreach ([1, 2, 3] as $number) {
                 DB::select('select ? as number', [$number]);
             }
@@ -88,6 +89,8 @@ trait DefinesTestApplication
             Event::dispatch('application.ready', [['safe' => true]]);
             Event::dispatch('eloquent.retrieved: '.ProfiledModel::class, [new ProfiledModel]);
             Log::info('Profiled request completed', ['authorization' => 'hidden']);
+            // Hosts that use wire:navigate load Livewire themselves; the bar no longer brings it.
+            $scripts = $livewire ? FrontendAssets::scripts() : '';
 
             return response(<<<HTML
                 <!doctype html>
@@ -98,6 +101,7 @@ trait DefinesTestApplication
                             <h1 data-testid="host-page">{$title}</h1>
                             <a href="{$nextPath}" wire:navigate data-testid="host-navigation">{$nextLabel}</a>
                         </main>
+                        {$scripts}
                     </body>
                 </html>
                 HTML);
@@ -111,6 +115,16 @@ trait DefinesTestApplication
         $router->middleware(ProfileRequest::class)->get(
             '/profiled-next',
             fn () => $profiledPage('Second request', '/profiled', 'Previous request'),
+        );
+
+        $router->middleware(ProfileRequest::class)->get(
+            '/profiled-navigate',
+            fn () => $profiledPage('First request', '/profiled-navigate-next', 'Next request', livewire: true),
+        );
+
+        $router->middleware(ProfileRequest::class)->get(
+            '/profiled-navigate-next',
+            fn () => $profiledPage('Second request', '/profiled-navigate', 'Previous request', livewire: true),
         );
 
         $router->middleware(ProfileRequest::class)->get('/profiled-timeline-long', function () {

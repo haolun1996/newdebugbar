@@ -1,15 +1,22 @@
-import { composeState, readInspectorPayload } from '../../runtime.js';
+import { composeState } from '../../runtime.js';
+import { formatDuration } from '../../duration.js';
 import { createActivity } from './activity.js';
 import { createComponents } from './components.js';
 import { createProperties } from './properties.js';
 
-/** Owns livewire controller inspector state and interactions. */
+/**
+ * Owns Livewire inspector state and interactions. The React view hands over the loaded inspector payload as
+ * `$livewirePayload` (non-reactive) and the shell refreshes it through `refresh()`.
+ */
 export function createController(context) {
   const { browser, trace } = context;
   return composeState(createActivity(context), createComponents(context), createProperties(context), {
+    $livewirePayload: null,
+    formatDuration,
+
     refresh() {
-      const payload = readInspectorPayload(this.$root, '[data-ndb-livewire-payload]');
-      if (payload !== null) this.mergeLivewireServer(payload);
+      this.initialized = true;
+      if (this.$livewirePayload) this.mergeLivewireServer(this.$livewirePayload);
     },
     activate() {
       if (this.stopLivewireTrace || this.destroyed) return;
@@ -105,7 +112,34 @@ export function createController(context) {
       if (this.livewireTab !== 'components' || !['properties', 'source'].includes(tab)) return;
 
       this.livewireDetailTab = tab;
-      this.$nextTick?.(() => browser.highlight?.());
+    },
+  });
+}
+
+/**
+ * A mounted Livewire inspector: the controller plus its shell lifecycle. `init()` registers it with the shell,
+ * which activates it while the Livewire inspector is visible; `destroy()` detaches it for good.
+ */
+export function createLivewireInspector(context) {
+  const { shell, profileId } = context;
+  const controller = createController(context);
+  const instance = Symbol('livewire');
+
+  return composeState(controller, {
+    profileId,
+    initialized: false,
+    destroyed: false,
+    init() {
+      shell.mountInspector('livewire', profileId, this, instance);
+    },
+    destroy() {
+      this.destroyed = true;
+      this.deactivate();
+      shell.unmountInspector(instance);
+    },
+    refresh() {
+      if (this.destroyed || profileId !== shell.summary.id) return;
+      controller.refresh.call(this);
     },
   });
 }

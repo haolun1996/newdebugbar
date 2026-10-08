@@ -1,160 +1,102 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness } from './state-test-support.js';
+import {
+  createViewDataLoader,
+  defaultViewFilter,
+  filterViews,
+  findRender,
+  firstRenderOrder,
+  formatViewData,
+  viewDataIsEmpty,
+} from '../../resources/js/inspectors/views.js';
 
-test('Views defaults to application records and lazily loads only the selected render', async () => {
-  const calls = [];
-  let highlighted = 0;
-  let detailFocuses = 0;
-  let rowFocuses = 0;
-  const browser = runtime();
-  browser.highlight = () => highlighted++;
-  const { state, shell } = inspectorHarness('views', summary, browser);
-  const groups = [
-    {
-      id: 'view-1',
-      name: 'trips.show',
-      display_name: 'trips.show',
-      origin: 'application',
-      count: 2,
-      items: [
-        {
-          render_order: 1,
-          data_key_count: 2,
-          composer_count: 0,
-          composers: [],
-          source_kind: 'template',
-        },
-        {
-          render_order: 2,
-          data_key_count: 1,
-          composer_count: 0,
-          composers: [],
-          source_kind: 'template',
-        },
-      ],
-    },
-    {
-      id: 'view-2',
-      name: 'pagination::tailwind',
-      display_name: 'pagination::tailwind',
-      origin: 'framework',
-      count: 1,
-      items: [
-        {
-          render_order: 3,
-          data_key_count: 3,
-          composer_count: 0,
-          composers: [],
-          source_kind: 'framework',
-        },
-      ],
-    },
-  ];
-  const rows = [
-    {
-      dataset: {
-        ndbViewGroup: 'view-1',
-        ndbViewOrigin: 'application',
-        ndbViewSearchValue: 'trips.show resources/views/trips/show.blade.php',
-        ndbViewCount: '2',
-      },
-      hidden: false,
-      focus: () => rowFocuses++,
-    },
-    {
-      dataset: {
-        ndbViewGroup: 'view-2',
-        ndbViewOrigin: 'framework',
-        ndbViewSearchValue: 'pagination::tailwind vendor/laravel/framework',
-        ndbViewCount: '1',
-      },
-      hidden: false,
-      focus: () => rowFocuses++,
-    },
-  ];
-  state.$refs = {
-    viewGroups: {
-      querySelectorAll(selector) {
-        return selector.includes(':not([hidden])') ? rows.filter((row) => !row.hidden) : rows;
-      },
-    },
-    viewDetail: { focus: () => detailFocuses++ },
-    content: { scrollTop: 20 },
-  };
-  state.$nextTick = (callback) => callback();
+const groups = [
+  { id: 'view-1', origin: 'application', search: 'trip.show resources/views', count: 2, items: [] },
+  {
+    id: 'view-2',
+    origin: 'application',
+    search: 'context',
+    count: 1,
+    items: [{ render_order: 3 }, { render_order: 5 }],
+  },
+  { id: 'view-3', origin: 'framework', search: 'layouts.app', count: 4 },
+];
 
-  state.initializeViews(groups);
-  assert.equal(state.viewFilter, 'application');
-  assert.equal(rows[0].hidden, false);
-  assert.equal(rows[1].hidden, true);
-  assert.equal(state.visibleViewCount, 1);
-  assert.equal(state.visibleViewRenderCount, 2);
+test('view filters default to application views and count the renders behind visible views', () => {
+  assert.equal(defaultViewFilter(groups), 'application');
+  assert.equal(defaultViewFilter([groups[2]]), 'all');
+  assert.equal(defaultViewFilter(), 'all');
 
-  state.selectViewGroup('view-1');
-  assert.equal(state.viewDetailOpen, true);
-  assert.equal(state.selectedViewGroup.name, 'trips.show');
-  assert.equal(state.selectedViewRender.render_order, 1);
-  assert.equal(detailFocuses, 1);
-  assert.equal(state.$refs.content.scrollTop, 0);
-
-  const wire = {
-    loadViewData: async (renderOrder) => {
-      calls.push(renderOrder);
-
-      return { label: `Render ${renderOrder}` };
-    },
-  };
-
-  state.loadSelectedViewData(wire);
-  assert.equal(state.viewDataLoading, true);
-  await Promise.resolve();
-  await Promise.resolve();
-
-  assert.deepEqual(calls, [1]);
-  assert.equal(state.viewDataLoaded, true);
-  assert.equal(state.viewDataIsEmpty, false);
-  assert.match(state.formattedViewData, /Render 1/);
-  assert.equal(highlighted, 1);
-
-  state.loadSelectedViewData(wire);
-  assert.deepEqual(calls, [1]);
-
-  state.selectViewRender(2);
-  assert.equal(state.viewDataLoaded, false);
-  state.loadSelectedViewData(wire);
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.deepEqual(calls, [1, 2]);
-
-  state.closeViewDetail();
-  assert.equal(state.viewDetailOpen, false);
-  assert.equal(rowFocuses, 1);
-
-  state.setViewFilter('framework');
-  assert.equal(rows[0].hidden, true);
-  assert.equal(rows[1].hidden, false);
-  assert.equal(state.viewSelected, null);
-  assert.equal(state.visibleViewRenderCount, 1);
+  const ids = (options) => filterViews(groups, options).visible.map((group) => group.id);
+  assert.deepEqual(ids(), ['view-1', 'view-2']);
+  assert.equal(filterViews(groups).renders, 3);
+  assert.deepEqual(ids({ filter: 'framework' }), ['view-3']);
+  assert.deepEqual(ids({ filter: 'all' }), ['view-1', 'view-2', 'view-3']);
+  assert.deepEqual(ids({ filter: 'unknown' }), ['view-1', 'view-2', 'view-3']);
+  assert.deepEqual(ids({ filter: 'all', search: ' CONTEXT ' }), ['view-2']);
+  assert.deepEqual(filterViews(groups, { filter: 'framework', search: 'trip' }), { visible: [], renders: 0 });
+  assert.equal(filterViews([{ origin: 'application' }]).renders, 0);
 });
 
-test('Views reports retryable lazy-data failures', async () => {
-  const { state, shell } = inspectorHarness('views', summary, runtime());
-  state.$nextTick = (callback) => callback();
-  state.initializeViews([
-    {
-      id: 'view-1',
-      origin: 'application',
-      items: [{ render_order: 8 }],
-    },
-  ]);
-  state.selectViewGroup('view-1');
+test('view renders resolve by render order and format passed data', () => {
+  assert.equal(firstRenderOrder(groups[1]), 3);
+  assert.equal(firstRenderOrder(groups[0]), null);
+  assert.equal(firstRenderOrder(null), null);
+  assert.equal(findRender(groups[1], '5'), groups[1].items[1]);
+  assert.equal(findRender(groups[1], 9), null);
+  assert.equal(findRender(null, 1), null);
+  assert.equal(viewDataIsEmpty(null), true);
+  assert.equal(viewDataIsEmpty([]), true);
+  assert.equal(viewDataIsEmpty({}), true);
+  assert.equal(viewDataIsEmpty('value'), true);
+  assert.equal(viewDataIsEmpty({ city: 'Kyoto' }), false);
+  assert.equal(formatViewData({ city: 'Kyoto' }), '{\n  "city": "Kyoto"\n}');
+  assert.equal(formatViewData(null), '{}');
+});
 
-  state.loadSelectedViewData({
-    loadViewData: async () => Promise.reject(new Error('expired')),
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(state.viewDataLoading, false);
-  assert.equal(state.viewDataError, true);
+test('view data loads ignore stale and cancelled answers', async () => {
+  const requests = [];
+  const loader = createViewDataLoader(
+    (order) =>
+      new Promise((resolve, reject) => {
+        requests.push({ order, resolve, reject });
+      }),
+  );
+  const results = [];
+  const callbacks = {
+    onLoad: (data) => results.push(['load', data]),
+    onError: () => results.push(['error']),
+  };
+
+  const first = loader.load(1, callbacks);
+  await Promise.resolve();
+  const second = loader.load('2', callbacks);
+  await Promise.resolve();
+  requests[0].resolve({ city: 'Old' });
+  requests[1].resolve(null);
+  await Promise.all([first, second]);
+  assert.deepEqual(
+    requests.map((request) => request.order),
+    [1, 2],
+  );
+  assert.deepEqual(results, [['load', {}]]);
+
+  const failed = loader.load(3, callbacks);
+  await Promise.resolve();
+  requests[2].reject(new Error('expired'));
+  await failed;
+  assert.deepEqual(results.at(-1), ['error']);
+
+  const cancelled = loader.load(4, callbacks);
+  await Promise.resolve();
+  loader.cancel();
+  requests[3].resolve({ city: 'Late' });
+  await cancelled;
+  assert.equal(results.length, 2);
+
+  await loader.load(0, callbacks);
+  await loader.load(Number.NaN, callbacks);
+  assert.deepEqual(results.slice(2), [['error'], ['error']]);
+  assert.equal(requests.length, 4);
 });

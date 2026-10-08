@@ -1,114 +1,119 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runtime, summary, inspectorHarness } from './state-test-support.js';
+import {
+  contextValue,
+  filterLogs,
+  logChannels,
+  logFirstSequence,
+  logLevels,
+  logRecordCount,
+  logWallTime,
+  naturalCompare,
+  prettyJson,
+  requestTimeLabel,
+  splitContext,
+} from '../../resources/js/inspectors/logs.js';
 
-test('log controls combine severity channel and search without losing record counts', () => {
-  const { state, shell } = inspectorHarness('logs', summary, runtime());
-  let detailFocuses = 0;
-  let detailScrolls = 0;
-  let rowFocuses = 0;
-  const item = (level, attention, channel, search, count = 1, sequence = 1) => ({
-    dataset: {
-      ndbLogLevel: level,
-      ndbLogAttention: String(attention),
-      ndbLogChannel: channel,
-      ndbLogSearchText: search,
-      ndbLogRecordCount: String(count),
-      ndbLogFirstSequence: String(sequence),
-    },
-    hidden: false,
-    focus: () => rowFocuses++,
-    style: {
-      display: '',
-      removeProperty(property) {
-        if (property === 'display') this.display = '';
-      },
-      setProperty(property, value) {
-        if (property === 'display') this.display = value;
-      },
-    },
+const entry = (level, attention, channel, search, count = 1, sequence = 1) => ({
+  level,
+  attention,
+  channel_filter: channel,
+  channel_label: channel,
+  search,
+  repeat_count: count,
+  first_sequence: sequence,
+});
+
+test('log filters combine severity, channel, and search without losing record counts', () => {
+  const groups = [
+    entry('info', false, 'stack', 'booking ready', 1, 1),
+    entry('warning', true, 'audit', 'retry needs attention', 3, 2),
+    entry('error', true, 'stack', 'partner rejected kyo-441', 2, 5),
+    { level: 'debug', search: 'no channel', sequence: 7 },
+  ];
+
+  assert.deepEqual(filterLogs(groups).visible.length, 4);
+  assert.equal(filterLogs(groups).records, 7);
+  assert.deepEqual(filterLogs(groups, { level: 'attention' }).visible.map(logFirstSequence), [2, 5]);
+  assert.equal(filterLogs(groups, { level: 'attention' }).records, 5);
+  assert.deepEqual(filterLogs(groups, { level: 'error' }).visible.map(logFirstSequence), [5]);
+  assert.deepEqual(filterLogs(groups, { channel: 'stack' }).visible.map(logFirstSequence), [1, 5]);
+  assert.deepEqual(filterLogs(groups, { channel: '__unknown__' }).visible.map(logFirstSequence), [7]);
+  assert.deepEqual(filterLogs(groups, { search: '  KYO-441 ' }).visible.map(logFirstSequence), [5]);
+  assert.deepEqual(filterLogs(groups, { level: 'attention', channel: 'audit', search: 'kyo' }), {
+    visible: [],
+    records: 0,
   });
-  const info = item('info', false, 'audit', 'request ready actor planner', 1, 1);
-  const warning = item('warning', true, 'stack', 'partner slow trip 41', 3, 2);
-  const error = item('error', true, 'stack', 'database unavailable orders.php', 1, 3);
-  const items = [info, warning, error];
-  state.$refs = {
-    logList: { children: items },
-    logDetail: {
-      focus: () => detailFocuses++,
-      scrollTo: () => detailScrolls++,
-    },
-  };
-  state.$root = {
-    querySelector: (selector) =>
-      items.find((entry) => selector.includes(entry.dataset.ndbLogFirstSequence)) ?? null,
-  };
-  state.$nextTick = (callback) => callback();
+  assert.equal(logRecordCount({ repeat_count: 0 }), 1);
+  assert.equal(logRecordCount({}), 1);
+  assert.equal(logFirstSequence({}), 1);
+});
 
-  state.initializeLogs();
-  assert.equal(state.logLevel, 'all');
-  assert.equal(state.logChannel, 'all');
-  assert.equal(state.logDetailSequence, null);
-  assert.equal(state.logDetailOpen, false);
-  assert.equal(state.visibleLogCount, 5);
-  assert.equal(state.visibleLogGroupCount, 3);
+test('log filter options keep severity order and sort channels by label naturally', () => {
+  assert.deepEqual(logLevels({ error: 1, custom: 2, debug: 3, info: 0 }), ['debug', 'error', 'custom']);
+  assert.deepEqual(logLevels(null), []);
+  assert.deepEqual(
+    logChannels(
+      [
+        { channel_filter: 'b', channel_label: 'Channel 10' },
+        { channel_filter: 'a', channel_label: 'channel 9' },
+      ],
+      { b: 1, a: 2, c: 3 },
+    ),
+    [
+      { value: 'c', label: 'c', count: 3 },
+      { value: 'a', label: 'channel 9', count: 2 },
+      { value: 'b', label: 'Channel 10', count: 1 },
+    ],
+  );
+  assert.deepEqual(logChannels([], null), []);
+  assert.equal(naturalCompare('Item2', 'item10'), -1);
+  assert.equal(naturalCompare('b', 'A'), 1);
+  assert.equal(naturalCompare('same', 'SAME'), 0);
+  assert.equal(naturalCompare('ab', 'abc'), -1);
+});
 
-  state.selectLogEntry(1);
-  assert.equal(state.logDetailSequence, 1);
-  assert.equal(state.logDetailOpen, true);
-  assert.equal(detailScrolls, 1);
-  state.setLogLevel('attention');
-  assert.equal(state.logDetailSequence, null);
-  assert.equal(state.logDetailOpen, false);
-  assert.equal(info.hidden, true);
-  assert.equal(info.style.display, 'none');
-  assert.equal(warning.hidden, false);
-  assert.equal(error.hidden, false);
-  assert.equal(state.visibleLogCount, 4);
-  assert.equal(state.visibleLogGroupCount, 2);
+test('log details format context, request time, wall time, and JSON like the PHP views', () => {
+  assert.equal(requestTimeLabel(null), '—');
+  assert.equal(requestTimeLabel(18.432), '+18.43 ms');
+  assert.equal(contextValue(null), 'null');
+  assert.equal(contextValue(true), 'true');
+  assert.equal(contextValue(false), 'false');
+  assert.equal(contextValue(41), '41');
 
-  state.selectLogEntry(3);
-  assert.equal(state.logDetailSequence, 3);
-  assert.equal(state.logDetailOpen, true);
-  state.setLogLevel('error');
-  assert.equal(state.logDetailSequence, 3);
-  assert.equal(state.logDetailOpen, true);
-  assert.equal(info.hidden, true);
-  assert.equal(warning.hidden, true);
-  assert.equal(error.hidden, false);
-  assert.equal(state.visibleLogCount, 1);
-  assert.equal(state.visibleLogGroupCount, 1);
+  const fields = [
+    { key: 'trip_id', value: 41, preview: '41', structured: false },
+    { key: 'detail', value: 'long value', preview: 'long…', structured: false },
+    { key: 'actor', value: { id: 7 }, preview: '{…}', structured: true },
+  ];
+  const { compact, expanded } = splitContext(fields);
+  assert.deepEqual(
+    compact.map((field) => field.key),
+    ['trip_id'],
+  );
+  assert.deepEqual(
+    expanded.map((field) => field.key),
+    ['detail', 'actor'],
+  );
 
-  state.logSearch = 'UNAVAILABLE';
-  state.applyLogFilters();
-  assert.equal(error.hidden, false);
+  assert.deepEqual(logWallTime('2026-08-24T16:32:10.123+02:00'), {
+    label: '2026-08-24 16:32:10.123 +02:00',
+    title: '2026-08-24T16:32:10+02:00',
+  });
+  assert.deepEqual(logWallTime('2026-08-24T16:32:10Z'), {
+    label: '2026-08-24 16:32:10.000 +00:00',
+    title: '2026-08-24T16:32:10+00:00',
+  });
+  assert.equal(logWallTime('2026-08-24T16:32:10.5-0500').label, '2026-08-24 16:32:10.500 -05:00');
+  assert.deepEqual(logWallTime('Mon, 24 Aug 2026 16:32:10 GMT'), {
+    label: '2026-08-24 16:32:10.000 +00:00',
+    title: '2026-08-24T16:32:10+00:00',
+  });
+  assert.equal(logWallTime('not a date'), null);
+  assert.equal(logWallTime(''), null);
+  assert.equal(logWallTime(null), null);
 
-  state.closeLogDetail();
-  assert.equal(state.logDetailOpen, false);
-  assert.equal(state.logDetailSequence, 3);
-  assert.equal(rowFocuses, 1);
-
-  state.setLogLevel('missing');
-  assert.equal(state.logLevel, 'error');
-
-  state.setLogLevel('all');
-  state.logSearch = '';
-  state.setLogChannel('audit');
-  assert.equal(info.hidden, false);
-  assert.equal(warning.hidden, true);
-  assert.equal(error.hidden, true);
-  assert.equal(state.visibleLogCount, 1);
-
-  state.setLogChannel('missing');
-  assert.equal(state.logChannel, 'audit');
-
-  state.selectLogEntry(3);
-  assert.equal(state.logDetailSequence, null);
-  assert.equal(detailFocuses, 0);
-
-  state.$refs = {};
-  state.setLogChannel('all');
-  assert.equal(state.visibleLogCount, 0);
-  assert.equal(state.visibleLogGroupCount, 0);
+  assert.equal(prettyJson({ url: 'a/b', city: '京都' }), '{\n    "url": "a/b",\n    "city": "京都"\n}');
+  assert.equal(prettyJson(undefined), 'null');
 });

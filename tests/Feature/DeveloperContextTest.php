@@ -7,8 +7,6 @@ use Illuminate\Session\Store;
 use Illuminate\Support\MessageBag;
 use Illuminate\Support\ViewErrorBag;
 use Illuminate\Validation\ValidationException;
-use Livewire\Livewire;
-use NewDebugBar\Livewire\DebugBar;
 use NewDebugBar\Presentation\ProfilePresenter;
 use NewDebugBar\Storage\ProfileStore;
 use NewDebugBar\Support\RequestContext;
@@ -83,15 +81,14 @@ it('captures validation field and rule names with the rendered redirect status',
         ->callsite->file->toBe('tests/Support/DefinesTestApplication.php')
         ->and($profile['inspectors']['exceptions']['summary']['count'])->toBe(0);
 
-    Livewire::test(DebugBar::class, ['profileId' => $response->headers->get('X-NewDebugBar-Profile')])
-        ->call('loadInspector', 'validation')
-        ->assertSee('2 fields failed validation')
-        ->assertSee('signup bag')
-        ->assertSee('Validation 422')
-        ->assertSee('Redirect 302')
-        ->assertSee('The name field is required.')
-        ->assertSee('tests/Support/DefinesTestApplication.php')
-        ->assertDontSee('Show validation messages');
+    $this->getJson('/__newdebugbar/api/profiles/'.$response->headers->get('X-NewDebugBar-Profile').'/inspectors/validation')
+        ->assertOk()
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.fields', ['email', 'name'])
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.error_bag', 'signup')
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.exception_status', 422)
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.response_status', 302)
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.messages.name.0', 'The name field is required.')
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.callsite.file', 'tests/Support/DefinesTestApplication.php');
 });
 
 it('carries redirected validation messages into the next profiled page', function () {
@@ -119,11 +116,11 @@ it('carries redirected validation messages into the next profiled page', functio
         ->not->toHaveKey('response_status')
         ->and($profile['inspectors']['validation']['summary']['count'])->toBe(1);
 
-    Livewire::test(DebugBar::class, ['profileId' => $response->headers->get('X-NewDebugBar-Profile')])
-        ->call('loadInspector', 'validation')
-        ->assertSee('Carried from the previous request.')
-        ->assertSee('The email has already been taken.')
-        ->assertSee('Failed rules and source code are not available on this request.');
+    $this->getJson('/__newdebugbar/api/profiles/'.$response->headers->get('X-NewDebugBar-Profile').'/inspectors/validation')
+        ->assertOk()
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.from_previous_request', true)
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.messages.email.0', 'The email has already been taken.')
+        ->assertJsonPath('profile.inspectors.validation.payload.items.0.rules', ['email' => [], 'team' => []]);
 });
 
 it('shows authentication and session shape without identity or values', function () {

@@ -4,23 +4,9 @@ use Illuminate\Support\Str;
 use NewDebugBar\Presentation\QueueActivityPresenter;
 use NewDebugBar\Presentation\RedisCommandPresenter;
 
-function inspectorPayload(string $html, string $attribute): array
+/** @return array<string, mixed> */
+function queueInspectorFixture(string $profileId, string $workerId): array
 {
-    $document = new DOMDocument;
-    $previousLibxmlState = libxml_use_internal_errors(true);
-
-    $document->loadHTML('<?xml encoding="utf-8" ?><!doctype html><html><body>'.$html.'</body></html>');
-    libxml_clear_errors();
-    libxml_use_internal_errors($previousLibxmlState);
-    $xpath = new DOMXPath($document);
-    $payload = trim((string) $xpath->evaluate("string(//*[@{$attribute}])"));
-
-    return json_decode(base64_decode($payload, true), true, flags: JSON_THROW_ON_ERROR);
-}
-
-it('normalizes queue lifecycle and related worker evidence for one active detail', function () {
-    $profileId = (string) Str::uuid();
-    $workerId = (string) Str::uuid();
     $inspector = [
         'summary' => [
             'count' => 2,
@@ -66,36 +52,14 @@ it('normalizes queue lifecycle and related worker evidence for one active detail
             ],
         ]],
     ];
-    $profile = ['background_activity' => ['pending' => false]];
-
     $inspector['payload']['records'] = app(QueueActivityPresenter::class)->present($inspector['payload']['items'], $profileId);
-    $html = view('newdebugbar::livewire.inspectors.queue', compact('profileId', 'profile', 'inspector'))->render();
-    $items = inspectorPayload($html, 'data-ndb-queue-payload');
 
-    expect($html)
-        ->toContain('data-ndb-queue-workspace', 'data-ndb-queue-profile-link')
-        ->not->toContain('data-ndb-queue-sort')
-        ->and($items)->toHaveCount(2)
-        ->and($items[0])
-        ->status_group->toBe('completed')
-        ->related_profile_id->toBe($workerId)
-        ->related_inspector->toBe('mail')
-        ->at_label->toBe('12.5 ms')
-        ->display_channels->toBe([])
-        ->attempts->toHaveCount(1)
-        ->and($items[0]['attempts'][0]['sequence'])->toBe(1)
-        ->and($items[0]['attempts'][0]['attempt'])->toBe(1)
-        ->and($items[0]['attempts'][0]['status'])->toBe('sent')
-        ->and($items[0]['attempts'][0]['profile_id'])->toBe($workerId)
-        ->and($items[1])
-        ->status_group->toBe('failed')
-        ->duration_label->toBe('4.25 ms')
-        ->exception_class->toBe(RuntimeException::class)
-        ->attempts->toBe([]);
-});
+    return $inspector;
+}
 
-it('keeps protected Redis identifiers out of rows and failure timing truthful', function () {
-    $protected = '18b0b12c34d56e78';
+/** @return array<string, mixed> */
+function redisInspectorFixture(string $protected): array
+{
     $inspector = [
         'summary' => ['count' => 2, 'failed_count' => 1, 'duration_ms' => 1.25],
         'payload' => ['items' => [
@@ -135,51 +99,46 @@ it('keeps protected Redis identifiers out of rows and failure timing truthful', 
     ];
 
     $inspector['payload']['records'] = app(RedisCommandPresenter::class)->present($inspector['payload']['items']);
-    $html = view('newdebugbar::livewire.inspectors.redis', compact('inspector'))->render();
-    $items = inspectorPayload($html, 'data-ndb-redis-payload');
-    $document = new DOMDocument;
-    $previousLibxmlState = libxml_use_internal_errors(true);
-    $document->loadHTML('<?xml encoding="utf-8" ?><!doctype html><html><body>'.$html.'</body></html>');
-    libxml_clear_errors();
-    libxml_use_internal_errors($previousLibxmlState);
-    $xpath = new DOMXPath($document);
-    $rows = $xpath->query('//*[@data-ndb-redis-item]');
-    $failedRow = trim((string) $xpath->evaluate('string(//*[@data-ndb-redis-item="2"])'));
 
-    expect($html)
-        ->toContain('data-ndb-redis-workspace')
-        ->toContain(
-            'data-ndb-redis-detail-body',
-            'data-ndb-redis-key-evidence',
-            'data-ndb-inspector-source-link',
-        )
-        ->not->toContain('data-ndb-redis-detail-tab', 'data-ndb-redis-sort', 'Succeeded')
-        ->and($rows->length)->toBe(2)
-        ->and(trim((string) $rows->item(0)?->textContent))->toContain('trip:kyoto')
-        ->and(trim((string) $rows->item(0)?->textContent))->not->toContain($protected)
-        ->and($failedRow)->toContain('1 protected key', '—')
+    return $inspector;
+}
+
+it('normalizes queue lifecycle and related worker evidence for one active detail', function () {
+    $workerId = (string) Str::uuid();
+    $items = queueInspectorFixture((string) Str::uuid(), $workerId)['payload']['records'];
+
+    expect($items)->toHaveCount(2)
         ->and($items[0])
+        ->status_group->toBe('completed')
+        ->related_profile_id->toBe($workerId)
+        ->related_inspector->toBe('mail')
+        ->at_label->toBe('12.5 ms')
+        ->display_channels->toBe([])
+        ->attempts->toHaveCount(1)
+        ->and($items[0]['attempts'][0]['sequence'])->toBe(1)
+        ->and($items[0]['attempts'][0]['attempt'])->toBe(1)
+        ->and($items[0]['attempts'][0]['status'])->toBe('sent')
+        ->and($items[0]['attempts'][0]['profile_id'])->toBe($workerId)
+        ->and($items[1])
+        ->status_group->toBe('failed')
+        ->duration_label->toBe('4.25 ms')
+        ->exception_class->toBe(RuntimeException::class)
+        ->attempts->toBe([]);
+});
+
+it('keeps protected Redis identifiers hashed and failure timing truthful', function () {
+    $protected = '18b0b12c34d56e78';
+    $items = redisInspectorFixture($protected)['payload']['records'];
+
+    expect($items[0])
         ->callsite->toBe(['file' => 'app/Services/TripCache.php', 'line' => 42])
         ->source_label->toBe('app/Services/TripCache.php:42')
+        ->key_label->toBe('trip:kyoto')
         ->and($items[1])
+        ->key_label->toBe('1 protected key')
         ->duration_label->toBe('—')
         ->key_count->toBe(1)
         ->key_hashes->toBe([$protected])
         ->callsite->toBe(['file' => 'app/Services/SessionStore.php', 'line' => null])
         ->source_label->toBe('app/Services/SessionStore.php');
-});
-
-it('renders truthful Queue and Redis empty states', function () {
-    $profileId = (string) Str::uuid();
-    $profile = ['background_activity' => ['pending' => false]];
-    $queue = ['summary' => ['duration_ms' => 0, 'failed_count' => 0], 'payload' => ['items' => []]];
-    $redis = ['summary' => ['duration_ms' => 0, 'failed_count' => 0], 'payload' => ['items' => []]];
-
-    expect(view('newdebugbar::livewire.inspectors.queue', [
-        'profileId' => $profileId,
-        'profile' => $profile,
-        'inspector' => $queue,
-    ])->render())->toContain('No queue activity was captured.')
-        ->and(view('newdebugbar::livewire.inspectors.redis', ['inspector' => $redis])->render())
-        ->toContain('No direct Redis commands were captured.');
 });

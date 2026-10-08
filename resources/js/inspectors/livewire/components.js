@@ -1,6 +1,5 @@
 /** Owns livewire components inspector state and interactions. */
-export function createComponents(context) {
-  const { browser } = context;
+export function createComponents() {
   return {
     livewireSelectedComponentId: null,
     livewireCollapsedComponents: [],

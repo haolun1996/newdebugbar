@@ -71,7 +71,7 @@ export function createNavigation(context) {
         this.syncInspectorPanels();
         if (this.$refs?.content) this.$refs.content.scrollTop = 0;
         this.deliverInspectorIntent();
-        if (focusHeading) this.$refs?.inspectorHeading?.focus?.();
+        if (focusHeading) this.$root?.querySelector?.('[data-ndb-inspector-heading]')?.focus?.();
         browser.highlight?.();
       });
       if (needsInspector) this.requestInspector(this.selected);

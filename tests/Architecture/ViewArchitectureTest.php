@@ -2,17 +2,17 @@
 
 use Symfony\Component\Finder\Finder;
 
-it('namespaces package-owned Blade identifiers away from host pages', function () {
-    $views = dirname(__DIR__, 2).'/resources/views';
+it('namespaces package-owned browser identifiers away from host pages', function () {
+    $ui = dirname(__DIR__, 2).'/resources/js/ui';
     $attributeViolations = [];
-    $literalIdViolations = [];
-    $alpineIdViolations = [];
+    $idViolations = [];
+    $hostDirectiveViolations = [];
 
-    foreach ((new Finder)->files()->in($views)->name('*.blade.php') as $file) {
+    foreach ((new Finder)->files()->in($ui)->name('*.jsx') as $file) {
         $relativePath = $file->getRelativePathname();
         $contents = file_get_contents($file->getPathname());
 
-        preg_match_all('/(?:^|\s):?data-(?<name>[a-z0-9_-]+)/m', $contents, $attributes);
+        preg_match_all('/(?:^|[\s{(,])[\'"]?data-(?<name>[a-z0-9_-]+)[\'"]?\s*[=:]/m', $contents, $attributes);
 
         foreach (array_unique($attributes['name']) as $name) {
             if (! str_starts_with($name, 'ndb-')) {
@@ -20,28 +20,25 @@ it('namespaces package-owned Blade identifiers away from host pages', function (
             }
         }
 
-        preg_match_all('/(?:^|\s)(?:::|:)?id="(?<id>[^"]+)"/m', $contents, $ids);
+        preg_match_all('/\sid=(?:"(?<literal>[^"]+)"|\{`(?<template>[^`$]*))/', $contents, $ids, PREG_SET_ORDER);
 
-        foreach (array_unique($ids['id']) as $id) {
-            if (! str_contains($id, '{{') && ! str_contains($id, '$id(') && ! str_starts_with($id, 'newdebugbar')) {
-                $literalIdViolations[] = $relativePath.': '.$id;
+        foreach ($ids as $id) {
+            $prefix = ($id['literal'] ?? '') !== '' ? $id['literal'] : ($id['template'] ?? '');
+
+            if ($prefix !== '' && ! str_starts_with($prefix, 'newdebugbar')) {
+                $idViolations[] = $relativePath.': '.$prefix;
             }
         }
 
-        preg_match_all('/x-id="\[(?<ids>[^]]+)]"/', $contents, $alpineGroups);
+        // Host pages may run their own Alpine or Livewire, which would interpret these on our markup.
+        preg_match_all('/\s(?<attribute>x-[a-z]+|wire:[a-z.]+)[=\s>]/', $contents, $directives);
 
-        foreach ($alpineGroups['ids'] as $group) {
-            preg_match_all("/'(?<id>[^']+)'/", $group, $alpineIds);
-
-            foreach ($alpineIds['id'] as $id) {
-                if (! str_starts_with($id, 'newdebugbar')) {
-                    $alpineIdViolations[] = $relativePath.': '.$id;
-                }
-            }
+        foreach (array_unique($directives['attribute']) as $attribute) {
+            $hostDirectiveViolations[] = $relativePath.': '.$attribute;
         }
     }
 
     expect($attributeViolations)->toBe([])
-        ->and($literalIdViolations)->toBe([])
-        ->and($alpineIdViolations)->toBe([]);
+        ->and($idViolations)->toBe([])
+        ->and($hostDirectiveViolations)->toBe([]);
 });

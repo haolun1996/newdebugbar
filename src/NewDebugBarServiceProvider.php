@@ -35,10 +35,9 @@ use NewDebugBar\Collectors\QueueCollector;
 use NewDebugBar\Collectors\RedisCollector;
 use NewDebugBar\Collectors\ValidationCollector;
 use NewDebugBar\Http\Controllers\AssetController;
-use NewDebugBar\Http\Controllers\CsrfTokenController;
+use NewDebugBar\Http\Controllers\DebugBarApiController;
 use NewDebugBar\Http\Controllers\MailPreviewController;
 use NewDebugBar\Http\Middleware\ProfileRequest;
-use NewDebugBar\Livewire\DebugBar;
 use NewDebugBar\Mcp\NewDebugBarServer;
 use NewDebugBar\Presentation\McpProfilePresenter;
 use NewDebugBar\Presentation\ProfilePresenter;
@@ -62,8 +61,6 @@ use NewDebugBar\Support\RuntimeProfiler;
 use NewDebugBar\Support\SafeUrl;
 use Psr\Log\LoggerInterface;
 use Throwable;
-
-use function Livewire\on;
 
 /** Registers profiling services only in explicitly allowed environments. */
 final class NewDebugBarServiceProvider extends ServiceProvider
@@ -197,8 +194,6 @@ final class NewDebugBarServiceProvider extends ServiceProvider
             config(['newdebugbar.enabled' => (bool) config('app.debug', false)]);
         }
 
-        $this->loadViewsFrom(__DIR__.'/../resources/views', 'newdebugbar');
-
         $this->publishes([
             __DIR__.'/../config/newdebugbar.php' => config_path('newdebugbar.php'),
         ], 'newdebugbar-config');
@@ -220,10 +215,12 @@ final class NewDebugBarServiceProvider extends ServiceProvider
             $this->app->make(BackgroundActivityStore::class),
             $this->app->make(LogChannelTracker::class),
         ))->register();
-        (new LivewireRegistrar(
-            $this->app,
-            $this->app->make(CallSiteResolver::class),
-        ))->register();
+        if ($this->livewireInstalled()) {
+            (new LivewireRegistrar(
+                $this->app,
+                $this->app->make(CallSiteResolver::class),
+            ))->register();
+        }
         /** @var ExceptionHandler $exceptions */
         $exceptions = $this->app->make(ExceptionHandler::class);
 
@@ -234,20 +231,19 @@ final class NewDebugBarServiceProvider extends ServiceProvider
                 return null;
             });
         }
-        on('exception', function (mixed $target, Throwable $exception): void {
-            if ($exception instanceof ValidationException) {
-                $this->app->make(ProfileManager::class)->recordValidationException($exception);
-            }
-        });
+        if ($this->livewireInstalled()) {
+            \Livewire\on('exception', function (mixed $target, Throwable $exception): void {
+                if ($exception instanceof ValidationException) {
+                    $this->app->make(ProfileManager::class)->recordValidationException($exception);
+                }
+            });
+        }
         $events->listen(
             RequestHandled::class,
             fn (RequestHandled $event) => $this->app->make(ProfileFinalizer::class)->handle($event),
         );
-        Livewire::component('newdebugbar.toolbar', DebugBar::class);
         $this->registerMcpServer();
-        $router->get('/__newdebugbar/csrf', CsrfTokenController::class)
-            ->middleware('web')
-            ->name('newdebugbar.csrf');
+        $this->registerApiRoutes($router);
         $router->get('/__newdebugbar/assets/{path}', AssetController::class)
             ->where('path', '.*')
             ->name('newdebugbar.asset');
@@ -270,6 +266,33 @@ final class NewDebugBarServiceProvider extends ServiceProvider
         if (method_exists($kernel, 'pushMiddleware')) {
             $kernel->pushMiddleware(ProfileRequest::class);
         }
+    }
+
+    private function registerApiRoutes(Router $router): void
+    {
+        $router->prefix('/__newdebugbar/api/profiles/{profile}')
+            ->where(['profile' => ProfileStore::ID_PATTERN])
+            ->group(function (Router $router): void {
+                $router->get('/', [DebugBarApiController::class, 'summary'])->name('newdebugbar.api.summary');
+                $router->get('/notice', [DebugBarApiController::class, 'notice'])->name('newdebugbar.api.notice');
+                $router->get('/related', [DebugBarApiController::class, 'related'])->name('newdebugbar.api.related');
+                $router->get('/inspectors/{inspector}', [DebugBarApiController::class, 'inspector'])
+                    ->where('inspector', '[a-z_]+')
+                    ->name('newdebugbar.api.inspector');
+                $router->get('/views/{renderOrder}', [DebugBarApiController::class, 'viewData'])
+                    ->where('renderOrder', '[1-9][0-9]{0,8}')
+                    ->name('newdebugbar.api.view-data');
+                $router->post('/queries/{execution}/explain', [DebugBarApiController::class, 'explainQuery'])
+                    ->where('execution', '[1-9][0-9]{0,8}')
+                    ->name('newdebugbar.api.explain-query');
+            });
+        $router->get('/__newdebugbar/api/recent', [DebugBarApiController::class, 'recent'])
+            ->name('newdebugbar.api.recent');
+    }
+
+    private function livewireInstalled(): bool
+    {
+        return class_exists(Livewire::class) && function_exists('Livewire\\on');
     }
 
     private function isEnabledEnvironment(): bool

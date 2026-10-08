@@ -31,7 +31,7 @@ it('applies the debug default, explicit override, and environment restriction to
         ->and(app('router')->getRoutes()->getByName('newdebugbar.asset') !== null)->toBe($enabled)
         ->and($mcp::getLocalServer('newdebugbar') !== null)->toBe($enabled)
         ->and($id !== null)->toBe($enabled)
-        ->and(substr_count($response->getContent(), 'id="newdebugbar"'))->toBe($enabled ? 1 : 0);
+        ->and(substr_count($response->getContent(), 'id="newdebugbar-mount"'))->toBe($enabled ? 1 : 0);
 
     if ($enabled) {
         expect(app(ProfileStore::class)->get($id))->not->toBeNull();

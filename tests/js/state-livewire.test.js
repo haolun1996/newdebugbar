@@ -2,7 +2,53 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import serverActivity from './fixtures/livewire-server-activity.json' with { type: 'json' };
 
-import { runtime, inspectorHarness } from './state-test-support.js';
+import { createLivewireInspector } from '../../resources/js/inspectors/livewire/controller.js';
+
+function runtime() {
+  const timers = new Set();
+
+  return {
+    timers,
+    afterPaint: (callback) => callback(),
+    nextFrame: (callback) => callback(),
+    schedule: (callback) => {
+      timers.add(callback);
+
+      return callback;
+    },
+    cancelSchedule: (timer) => timers.delete(timer),
+    now: () => 13_000,
+    runTimers: () => {
+      const callbacks = [...timers];
+      timers.clear();
+      callbacks.forEach((callback) => callback());
+    },
+  };
+}
+
+// The shell side of the inspector lifecycle: a mounted inspector is active while the Livewire inspector is open.
+function inspectorHarness(inspector, summary, browser, recentProfiles, profileLimit, trace) {
+  const shell = {
+    summary: { ...summary },
+    selected: inspector,
+    inspectorOpen: true,
+    barVisible: true,
+    current: null,
+    mountInspector(_inspector, _profileId, controller, instance) {
+      this.current?.controller.deactivate();
+      this.current = { controller, instance };
+      controller.activate();
+    },
+    unmountInspector(instance) {
+      if (this.current?.instance !== instance) return;
+      this.current.controller.deactivate();
+      this.current = null;
+    },
+  };
+  const state = createLivewireInspector({ browser, trace, shell, profileId: shell.summary.id });
+
+  return { state, shell };
+}
 
 const livewireSummary = {
   id: '550e8400-e29b-41d4-a716-446655440000',
@@ -988,7 +1034,7 @@ test('clears property drafts only when leaving their component context', () => {
   assert.deepEqual(state.livewireDrafts, {});
 });
 
-test('keeps a closing draft alive until Alpine removes its popover', () => {
+test('keeps a closing draft alive until its popover unmounts', () => {
   const { state, shell } = stateHarness();
   const count = state.livewirePropertyRows.find(({ path }) => path === 'count');
   const ticks = [];
@@ -1289,4 +1335,76 @@ test('formats sparse Livewire evidence as deliberate unavailable and zero states
     }),
     '0 changed, 0 editable',
   );
+});
+
+test('reads the loaded payload on refresh only while mounted for the current request', () => {
+  const trace = traceHarness();
+  const { state, shell } = inspectorHarness('livewire', livewireSummary, runtime(), [], 20, trace);
+  state.init();
+
+  state.refresh();
+  assert.equal(state.initialized, true);
+  assert.deepEqual(state.livewireServerComponents, []);
+
+  state.$livewirePayload = {
+    components: [{ id: 'root-1', class: 'App\\Livewire\\Benchmark\\ControlPanel', properties: [] }],
+    activity_records: [],
+  };
+  shell.summary = { ...shell.summary, id: 'another-request' };
+  state.refresh();
+  assert.deepEqual(state.livewireServerComponents, []);
+
+  shell.summary = { ...livewireSummary };
+  state.refresh();
+  assert.deepEqual(
+    state.livewireServerComponents.map(({ id }) => id),
+    ['root-1'],
+  );
+  assert.equal(state.livewireComponents[0].server.class, 'App\\Livewire\\Benchmark\\ControlPanel');
+  assert.equal(state.formatDuration(1.5), '1.5 ms');
+
+  state.destroy();
+  assert.equal(shell.current, null);
+  state.$livewirePayload = { components: [{ id: 'later', properties: [] }], activity_records: [] };
+  state.refresh();
+  assert.deepEqual(
+    state.livewireServerComponents.map(({ id }) => id),
+    ['root-1'],
+  );
+});
+
+test('groups update phases into browser and server steps with plain-language help', () => {
+  const { browser, state } = stateHarness();
+  const phases = ['Queued', 'Sent', 'Streamed', 'Responded', 'Synced', 'Custom'].map((name, index) => ({
+    name,
+    at: index,
+  }));
+
+  assert.deepEqual(
+    state
+      .livewireActivityPhaseGroups({ phases })
+      .map(({ kind, label, steps }) => [kind, label, steps.map(({ phase }) => phase.name)]),
+    [
+      ['send', 'Browser', ['Queued', 'Sent']],
+      ['server', 'Server', []],
+      ['receive', 'Browser', ['Streamed', 'Responded', 'Synced', 'Custom']],
+    ],
+  );
+  assert.deepEqual(state.livewireActivityPhaseGroups(null), []);
+  assert.equal(state.livewirePhaseLabel('Morphed'), 'Page HTML updated');
+  assert.equal(state.livewirePhaseLabel('Custom'), 'Custom');
+  assert.equal(state.livewirePhaseDescription('Sent'), 'The browser sends the update to the server.');
+  assert.equal(state.livewirePhaseDescription(undefined), 'Livewire recorded this phase.');
+
+  assert.equal(state.livewireActivityParentTitle({ componentId: 'child-1' }), 'Control Panel');
+  assert.equal(state.livewireActivityParentTitle({ componentId: 'root-1' }), 'Top level');
+  assert.equal(
+    state.livewireActivitySummary({ kind: 'mutation', componentTitle: 'Control Panel', changes: [] }),
+    'Control Panel sent a state change to the server.',
+  );
+
+  browser.now = () => 20_000;
+  browser.runTimers();
+  assert.equal(state.livewireClock, 20_000);
+  assert.equal(browser.timers.size, 1);
 });

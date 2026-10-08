@@ -40,7 +40,7 @@ it('keeps inspector content stable while delayed loading feedback takes over', f
     $page->script(<<<'JS'
         (() => {
             const root = document.getElementById('newdebugbar');
-            const state = Alpine.$data(root);
+            const state = newDebugBarData(root);
 
             state.selected = 'queries';
             state.inspectorLoading = true;
@@ -62,7 +62,7 @@ it('keeps inspector content stable while delayed loading feedback takes over', f
             document.querySelector('[data-ndb-inspector-body]').classList.contains('ndb:opacity-0')
             JS);
 
-    $page->script("Alpine.\$data(document.getElementById('newdebugbar')).inspectorLoadingIndicator = true");
+    $page->script("newDebugBarData(document.getElementById('newdebugbar')).inspectorLoadingIndicator = true");
 
     DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-inspector-loading]');
 
@@ -70,7 +70,7 @@ it('keeps inspector content stable while delayed loading feedback takes over', f
 
     $page->script(<<<'JS'
         (() => {
-            const state = Alpine.$data(document.getElementById('newdebugbar'));
+            const state = newDebugBarData(document.getElementById('newdebugbar'));
 
             state.selected = 'request';
             state.inspectorLoading = false;

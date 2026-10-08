@@ -85,16 +85,9 @@ export function installProfileDiscoveryBridge(runtime = window) {
       if (!PROFILE_PATTERN.test(profileId ?? '')) return;
 
       const root = runtime.document?.getElementById?.('newdebugbar');
-      const state = root ? runtime.Alpine?.$data?.(root) : null;
+      const state = root ? runtime.newDebugBarData?.(root) : null;
 
-      if (typeof state?.noticeProfile === 'function') {
-        state.noticeProfile(profileId, event.detail?.foreground === true);
-        return;
-      }
-
-      const toolbar = runtime.Livewire?.getByName?.('newdebugbar.toolbar')?.[0];
-      const method = event.detail?.foreground === true ? 'switchProfile' : 'noticeProfile';
-      Promise.resolve(toolbar?.[method]?.(profileId)).catch(() => {});
+      state?.noticeProfile?.(profileId, event.detail?.foreground === true);
     } catch {
       // A stale or unavailable toolbar must never affect the host request.
     }

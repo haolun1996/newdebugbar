@@ -76,8 +76,9 @@ Run the smallest complete set that covers the change:
 - Focused Pest feature or architecture tests.
 - Focused browser test for rendered behavior.
 - JavaScript tests when state logic changed.
-- `composer lint` for PHP and Blade formatting.
-- `npm run build` when Tailwind classes or JavaScript changed.
+- `composer lint` for PHP formatting.
+- `npx prettier --write --single-quote --print-width 110 <files>` for changed JavaScript and JSX.
+- `npm run build` when Tailwind classes, JavaScript, or JSX changed.
 - `git diff --check` before committing.
 
 Keep focused results separate from unrelated inherited failures.

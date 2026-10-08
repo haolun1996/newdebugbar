@@ -3,18 +3,21 @@
 namespace NewDebugBar\Support;
 
 use Illuminate\Http\Response as LaravelResponse;
-use Livewire\LivewireManager;
-use Livewire\Mechanisms\FrontendAssets\FrontendAssets;
+use NewDebugBar\Presentation\DebugBarPresenter;
+use NewDebugBar\Presentation\ProfilePresenter;
+use NewDebugBar\Storage\ProfileStore;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
-/** Adds the Livewire toolbar and package assets to supported HTML responses. */
+/** Adds the bar's mount point, its boot data, and the package assets to supported HTML responses. */
 final class BarInjector
 {
     public function __construct(
-        private readonly LivewireManager $livewire,
         private readonly AssetUrl $assets,
+        private readonly ProfileStore $store,
+        private readonly ProfilePresenter $presenter,
+        private readonly DebugBarPresenter $bar,
     ) {}
 
     public function inject(Response $response, string $profileId): Response
@@ -27,23 +30,24 @@ final class BarInjector
 
         $stylesheet = e($this->assets->for('newdebugbar.css'));
         $script = e($this->assets->for('newdebugbar.js'));
-        $component = $this->livewire->mount('newdebugbar.toolbar', ['profileId' => $profileId], 'newdebugbar-toolbar');
-        $livewireStyles = FrontendAssets::styles();
-        $livewireScripts = FrontendAssets::scripts();
+        $boot = json_encode([
+            'summary' => $this->bar->summary($this->presenter->present($this->store->get($profileId) ?? []), $profileId),
+            'profile_limit' => $this->store->maxProfiles(),
+            'api' => url('/__newdebugbar/api'),
+        ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
-        $head = $livewireStyles
-            .'<style id="newdebugbar-critical-css" data-navigate-once="true">#newdebugbar [x-cloak]{display:none!important}</style>'
-            .'<link rel="stylesheet" href="'.$stylesheet.'" data-navigate-once="true">';
-        $body = '<script src="'.$script.'" data-navigate-once="true"></script>'
-            .$component
-            .$livewireScripts;
+        $head = '<link rel="stylesheet" href="'.$stylesheet.'" data-navigate-once="true">';
+        $body = '<div id="newdebugbar-mount" style="display:contents!important"></div>'
+            .'<script type="application/json" id="newdebugbar-boot">'.$boot.'</script>'
+            .'<script src="'.$script.'" data-navigate-once="true"></script>';
+        // Callbacks keep `$` and `\` in the injected markup literal; they are not replacement references.
         if (preg_match('/<\/head\s*>/i', $html) === 1) {
-            $html = preg_replace('/<\/head\s*>/i', $head.'$0', $html, 1) ?? $html;
+            $html = preg_replace_callback('/<\/head\s*>/i', fn (array $match): string => $head.$match[0], $html, 1) ?? $html;
         } elseif (preg_match('/<html(?:\s[^>]*)?>/i', $html) === 1) {
-            $html = preg_replace('/<html(?:\s[^>]*)?>/i', '$0<head>'.$head.'</head>', $html, 1) ?? $html;
+            $html = preg_replace_callback('/<html(?:\s[^>]*)?>/i', fn (array $match): string => $match[0].'<head>'.$head.'</head>', $html, 1) ?? $html;
         }
 
-        $html = preg_replace('/<\/body\s*>/i', $body.'$0', $html, 1) ?? $html;
+        $html = preg_replace_callback('/<\/body\s*>/i', fn (array $match): string => $body.$match[0], $html, 1) ?? $html;
 
         $original = $response instanceof LaravelResponse ? $response->getOriginalContent() : null;
         $response->setContent($html);

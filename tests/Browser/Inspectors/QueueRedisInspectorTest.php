@@ -64,6 +64,9 @@ it('shows retained attempts inline and removes them when filtering selects an un
         ->assertVisible('[data-ndb-queue-attempts]')
         ->assertCount('[data-ndb-queue-attempt]', 1)
         ->assertSee('Open worker')
+        ->assertVisible('[data-ndb-queue-profile-link]')
+        ->assertScript('document.querySelectorAll("[data-ndb-queue-workspace]").length', 1)
+        ->assertScript('document.querySelector("[data-ndb-queue-sort]") === null')
         ->select('[data-ndb-queue-filter]', 'failed')
         ->assertAttribute('[data-ndb-queue-item="2"]', 'aria-pressed', 'true')
         ->assertMissing('[data-ndb-queue-attempts]')
@@ -144,7 +147,7 @@ it('shows Redis command and bounded key evidence without primary hashes', functi
         ->assertSeeIn('[data-ndb-redis-detail-header] [data-ndb-redis-key-label]', 'private-direct-key')
         ->assertScript(<<<'JS'
             (() => {
-                const payload = JSON.parse(atob(document.querySelector('[data-ndb-redis-payload]').textContent.trim()));
+                const payload = newDebugBarData(document.querySelector('[data-ndb-redis]')).redisCommands;
                 const primary = [...document.querySelectorAll('[data-ndb-redis-key-label]')].map((item) => item.textContent.trim());
                 const hashes = payload.flatMap((command) => command.key_hashes ?? []);
                 const header = document.querySelector('[data-ndb-redis-detail-header]');
@@ -216,6 +219,21 @@ it('shows protected Redis identifiers in the interface typeface', function () {
         ->assertSee('Copy identifiers')
         ->assertScript(<<<'JS'
             (() => {
+                const commands = newDebugBarData(document.querySelector('[data-ndb-redis]')).redisCommands;
+                const hashes = commands.flatMap((command) => command.key_hashes ?? []);
+                const rows = [...document.querySelectorAll('[data-ndb-redis-item]')];
+
+                return hashes.length > 0
+                    && rows.length === commands.length
+                    && rows.every((row) => hashes.every((hash) => !row.textContent.includes(hash)))
+                    && rows[0].textContent.includes('1 protected key')
+                    && document.querySelector('[data-ndb-redis-detail-tab]') === null
+                    && document.querySelector('[data-ndb-redis-sort]') === null
+                    && !document.querySelector('[data-ndb-redis]').textContent.includes('Succeeded');
+            })()
+            JS)
+        ->assertScript(<<<'JS'
+            (() => {
                 const identifier = document.querySelector('[data-ndb-redis-key-hash]');
                 const detail = document.querySelector('[data-ndb-redis-detail]');
 
@@ -271,5 +289,26 @@ it('uses a focused Redis detail with Back on mobile light mode', function () {
             JS)
         ->click('[data-ndb-redis-back]')
         ->assertScript('document.activeElement === document.querySelector("[data-ndb-redis-item=\\"1\\"]")')
+        ->assertNoJavaScriptErrors();
+});
+
+it('shows truthful empty Queue and Redis states', function () {
+    $page = visit('/profiled-http-client-empty')->resize(1280, 720);
+
+    $page->click('[data-ndb-window-controls="compact"] [data-ndb-window-action="expand"]');
+
+    DebugBarBrowser::selectInspectorViaPalette($page, 'queue');
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-queue]');
+
+    $page
+        ->assertSeeIn('[data-ndb-queue]', 'No queue activity was captured.')
+        ->assertScript('document.querySelector("[data-ndb-queue-workspace]") === null');
+
+    DebugBarBrowser::selectInspectorViaPalette($page, 'redis');
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-redis]');
+
+    $page
+        ->assertSeeIn('[data-ndb-redis]', 'No direct Redis commands were captured.')
+        ->assertScript('document.querySelector("[data-ndb-redis-workspace]") === null')
         ->assertNoJavaScriptErrors();
 });

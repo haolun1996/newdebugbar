@@ -1,5 +1,7 @@
 <?php
 
+use NewDebugBar\Storage\ProfileStore;
+
 it('presents repeated queries as one shared list detail record', function () {
     visit('/profiled')
         ->resize(1440, 900)
@@ -31,6 +33,8 @@ it('presents repeated queries as one shared list detail record', function () {
 
                 return rows.length === 1
                     && repeated.length === 1
+                    && repeated[0].dataset.ndbQueryGroup?.startsWith('group-')
+                    && root.querySelector('[data-ndb-query-group-executions]') === null
                     && Number(repeated[0].dataset.ndbQueryExecutionCount) === 3
                     && repeated[0].getAttribute('aria-pressed') === 'true'
                     && typeBadge?.textContent.trim() === 'read'
@@ -89,7 +93,7 @@ it('presents repeated queries as one shared list detail record', function () {
         ->assertVisible('[data-ndb-query-detail-panel="overview"]')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.querySelector('[data-ndb-queries]'));
+                const state = newDebugBarData(document.querySelector('[data-ndb-queries]'));
 
                 return state.querySelectedExecution === 2
                     && state.queryDetailTab === 'overview'
@@ -107,7 +111,7 @@ it('filters searches and sorts a varied query profile', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const root = document.querySelector('[data-ndb-queries]');
-                const state = Alpine.$data(root);
+                const state = newDebugBarData(root);
                 const rows = [...root.querySelectorAll('[data-ndb-query-item]')];
                 const retained = rows.reduce((count, row) => count + Number(row.dataset.ndbQueryExecutionCount), 0);
                 const repeated = state.queryRecords.find((record) => record.repeated && record.count === 8);
@@ -207,13 +211,31 @@ it('filters searches and sorts a varied query profile', function () {
         ->fill('[data-ndb-query-search]', 'connection_probe')
         ->assertScript(<<<'JS'
             [...document.querySelectorAll('[data-ndb-query-item]:not([hidden])')].length === 1
-                && Alpine.$data(document.querySelector('[data-ndb-queries]')).visibleQueryCount === 1
+                && newDebugBarData(document.querySelector('[data-ndb-queries]')).visibleQueryCount === 1
             JS)
         ->assertSee('query_replica')
         ->fill('[data-ndb-query-search]', 'nothing can match this query')
         ->waitForText('No queries match these controls.')
         ->assertScript('document.querySelectorAll("[data-ndb-query-item]:not([hidden])").length', 0)
         ->assertMissing('[data-ndb-query-active-detail]')
+        ->assertVisible('[data-ndb-query-detail-empty]')
+        ->assertScript(<<<'JS'
+            (() => {
+                const detail = document.querySelector('[data-ndb-query-detail]').getBoundingClientRect();
+                const empty = document.querySelector('[data-ndb-query-detail-empty]');
+                const box = empty.getBoundingClientRect();
+                const label = empty.querySelector('p');
+                const labelBox = label.getBoundingClientRect();
+                const near = (left, right) => Math.abs(left - right) <= 1;
+
+                return label.textContent.trim() === 'Choose a query to inspect its evidence.'
+                    && getComputedStyle(label).textAlign === 'center'
+                    && near(box.bottom, detail.bottom)
+                    && box.height > detail.height / 2
+                    && near(labelBox.top + labelBox.height / 2, box.top + box.height / 2)
+                    && near(labelBox.left + labelBox.width / 2, box.left + box.width / 2);
+            })()
+            JS)
         ->assertNoJavaScriptErrors();
 });
 
@@ -230,7 +252,7 @@ it('runs EXPLAIN for the selected repeated execution', function () {
         ->assertMissing('[data-ndb-query-explain-action]')
         ->assertScript(<<<'JS'
             (() => {
-                const state = Alpine.$data(document.querySelector('[data-ndb-queries]'));
+                const state = newDebugBarData(document.querySelector('[data-ndb-queries]'));
 
                 return state.querySelectedExecution === 2
                     && state.queryExplainExecution === 2
@@ -275,10 +297,14 @@ it('moves from the query list to one focused mobile detail', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const root = document.getElementById('newdebugbar');
+                const stage = document.querySelector('[data-ndb-inspector-stage]').getBoundingClientRect();
                 const workspace = document.querySelector('[data-ndb-query-workspace]');
+                const workspaceBox = workspace.getBoundingClientRect();
                 const detail = document.querySelector('[data-ndb-query-detail]');
 
                 return root.scrollWidth <= root.clientWidth + 1
+                    && Math.abs(workspaceBox.left - stage.left) <= 1
+                    && Math.abs(workspaceBox.right - stage.right) <= 1
                     && workspace.scrollWidth <= workspace.clientWidth + 1
                     && getComputedStyle(detail).display === 'none';
             })()
@@ -361,5 +387,77 @@ it('shows a clear empty query state when no SQL was captured', function () {
         ->click('[data-ndb-inspector="queries"]')
         ->waitForText('No database queries were captured for this request.')
         ->assertMissing('[data-ndb-query-workspace]')
+        ->assertNoJavaScriptErrors();
+});
+
+it('renders stored query evidence with slow repeated rows, total time, and transaction omissions', function () {
+    $page = visit('/profiled')->resize(1440, 900);
+    $id = $page->script("newDebugBarData(document.getElementById('newdebugbar')).summary.id");
+    $store = app(ProfileStore::class);
+    $profile = $store->get($id);
+    $profile['inspectors']['queries'] = [
+        'label' => 'Queries',
+        'summary' => [
+            'count' => 4,
+            'duration_ms' => 1466.04,
+            'transaction_count' => 3,
+            'transaction_retained_count' => 1,
+            'transaction_dropped_count' => 2,
+            'truncated' => true,
+        ],
+        'payload' => [
+            'items' => [
+                ...array_map(fn (int $duration): array => [
+                    'sql' => 'select ? as number',
+                    'bindings' => [$duration],
+                    'duration_ms' => $duration,
+                    'connection' => 'testing',
+                    'driver' => 'sqlite',
+                ], [120, 20, 10]),
+                [
+                    'sql' => 'select * from clinics',
+                    'bindings' => [],
+                    'duration_ms' => 1316.04,
+                    'connection' => 'testing',
+                    'driver' => 'sqlite',
+                ],
+            ],
+            'transactions' => [['kind' => 'begin']],
+        ],
+    ];
+    $store->put($profile);
+
+    $page->click('[data-ndb-toolbar="queries"]')
+        ->waitForText('Repeated query pattern')
+        ->assertVisible('[data-ndb-collection-status="query-transactions"]')
+        ->assertSeeIn('[data-ndb-collection-status="query-transactions"]', 'Showing 1 of 3 query transaction events.')
+        ->assertSeeIn('[data-ndb-query-total-time]', '1.47 s total')
+        ->assertSeeIn('[data-ndb-query-summary-count]', '4 queries')
+        ->assertScript(<<<'JS'
+            (() => {
+                const rows = [...document.querySelectorAll('[data-ndb-query-item]')];
+                const group = document.querySelector('[data-ndb-query-item][data-ndb-query-group]');
+                const idle = rows.find((row) => row !== group);
+                const classes = (row) => [...row.classList];
+
+                return rows.length === 2
+                    && group.dataset.ndbSlow === 'true'
+                    && group.dataset.ndbRepeated === 'true'
+                    && group.textContent.includes('Slow repeated query.')
+                    && idle.textContent.includes('Slow query.')
+                    && idle.classList.contains('ndb:bg-red-50/70')
+                    && classes(group).some((name) => name.startsWith('ndb:bg-red-50/'))
+                    && ! classes(group).some((name) => name.startsWith('ndb:bg-amber-50/'));
+            })()
+            JS)
+        ->assertScript(<<<'JS'
+            (() => {
+                const group = document.querySelector('[data-ndb-query-item][data-ndb-query-group]');
+
+                return group.getAttribute('aria-pressed') === 'true'
+                    && group.classList.contains('ndb:bg-red-50/90')
+                    && ! group.classList.contains('ndb:bg-amber-50/90');
+            })()
+            JS)
         ->assertNoJavaScriptErrors();
 });

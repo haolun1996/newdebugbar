@@ -5,7 +5,7 @@ use NewDebugBar\Tests\Support\DebugBarBrowser;
 it('keeps background read errors usable under host styles and clears them after recovery', function (int $width, int $height, string $theme) {
     $page = visit('/profiled-queued-communications?background_error=1')->resize($width, $height);
     $page->script(<<<JS
-        Alpine.\$data(document.querySelector('#newdebugbar')).setTheme('{$theme}');
+        newDebugBarData(document.querySelector('#newdebugbar')).setTheme('{$theme}');
         const style = document.createElement('style');
         style.textContent = `[role="status"], [data-background-activity-error] {
             background: red; color: green; width: 1200px; padding: 50px; font-size: 42px;
@@ -41,7 +41,7 @@ it('keeps background read errors usable under host styles and clears them after 
             JS);
     $page->script("fetch('/__newdebugbar/testing/repair-background')");
     $page->assertScript("document.querySelector('[data-ndb-background-activity-error]').getClientRects().length === 0")
-        ->assertScript("Alpine.\$data(document.querySelector('#newdebugbar')).summary.background_pending === true")
+        ->assertScript("newDebugBarData(document.querySelector('#newdebugbar')).summary.background_pending === true")
         ->assertNoJavaScriptErrors();
 })->with([
     'short light' => [1280, 640, 'light'],
@@ -87,6 +87,32 @@ it('isolates the shared inspector list and drag classes from host styles', funct
         ->assertNoJavaScriptErrors();
 
     DebugBarBrowser::assertFavoriteOrder($page, 'queries,request');
+});
+
+it('keeps the React mount point and hidden UI isolated from host styles', function () {
+    $page = visit('/hostile-styles')->resize(1024, 720);
+    $page->script(<<<'JS'
+        const style = document.createElement('style');
+        style.textContent = `
+            body > div { display: block !important; position: relative; transform: translateX(0); padding: 40px; }
+            [hidden] { display: block !important; }
+        `;
+        document.head.append(style);
+        JS);
+    DebugBarBrowser::waitForVisibleElement($page, '[data-ndb-toolbar-shell]');
+    $page->assertScript(<<<'JS'
+        (() => {
+            const mount = document.getElementById('newdebugbar-mount');
+            const toolbar = document.querySelector('[data-ndb-toolbar-shell]').getBoundingClientRect();
+            const palette = document.querySelector('#newdebugbar [aria-label="Command palette"]');
+            return getComputedStyle(mount).display === 'contents'
+                && mount.getClientRects().length === 0
+                && Math.abs(window.innerHeight - toolbar.bottom) <= 24
+                && palette.hidden === true
+                && palette.getClientRects().length === 0;
+        })()
+        JS)
+        ->assertNoJavaScriptErrors();
 });
 
 it('isolates unread request dots from host styles', function () {
@@ -642,7 +668,6 @@ it('keeps host styles and package styles isolated', function () {
         ->assertScript(<<<'JS'
             (() => {
                 const row = document.querySelector('[data-ndb-mail-item]');
-                const payload = document.querySelector('[data-ndb-mail-payload]');
                 const frame = document.querySelector('[data-ndb-mail-preview-frame]');
                 const actions = document.querySelector('[data-ndb-mail-actions]');
                 const metadata = document.querySelector('[data-ndb-mail-metadata]');
@@ -654,8 +679,6 @@ it('keeps host styles and package styles isolated', function () {
                 const tabIcons = [...document.querySelectorAll('[data-ndb-mail-detail-tab-icon]')];
 
                 return getComputedStyle(row).borderLeftWidth === '0px'
-                    && payload.tagName === 'SCRIPT'
-                    && getComputedStyle(payload).display === 'none'
                     && frame.getBoundingClientRect().width > 300
                     && getComputedStyle(frame).borderLeftWidth === '1px'
                     && getComputedStyle(actions).borderLeftWidth === '0px'

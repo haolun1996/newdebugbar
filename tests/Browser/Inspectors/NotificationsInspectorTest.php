@@ -71,15 +71,11 @@ it('groups notification attempts in a full-height delivery inspector', function 
             JS)
         ->assertScript(<<<'JS'
             (() => {
-                const root = document.querySelector('[data-ndb-notifications]');
-                const payload = root.querySelector('[data-ndb-notification-payload]');
-                const payloadContent = payload.textContent.trim();
-                const notifications = JSON.parse(atob(payloadContent));
+                const titles = [...document.querySelectorAll('[data-ndb-notification-item] [data-ndb-notification-list-title]')]
+                    .map((title) => title.textContent.trim());
 
-                return !root.getAttribute('x-init').includes('ProfiledNotification')
-                    && /^[A-Za-z0-9+/=]+$/.test(payloadContent)
-                    && notifications.length === 2
-                    && notifications.some(({ notification }) => notification.endsWith('\\ProfiledNotification'));
+                return titles.length === 2
+                    && titles.every((title) => title === 'ProfiledNotification');
             })()
             JS)
         ->assertScript(<<<'JS'
